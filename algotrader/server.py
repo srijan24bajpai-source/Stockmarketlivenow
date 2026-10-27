@@ -52,8 +52,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"USDINR": market.usdinr()}))
         if path == "/api/optionchain":
             tgt = arg("target") or None
-            return self._send(200, json.dumps(
-                market.option_chain(arg("underlying", "NIFTY"), int(arg("strikes", "8")), tgt)))
+            extra = [x for x in arg("strike").split(",") if x.strip()]
+            return self._send(200, json.dumps(market.option_chain(
+                arg("underlying", "NIFTY"), int(arg("strikes", "10")), tgt,
+                arg("expiry", "weekly") or "weekly", extra)))
         if path == "/api/optionunderlyings":
             rows = [{"symbol": i["symbol"], "name": i["name"], "type": i["type"],
                      "lot": market.LOTS.get(market.id_prefix(i["symbol"]),

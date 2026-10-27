@@ -42,3 +42,19 @@ def chain(name, spot, expiry_days, sigma, strikes=5, step=None):
                         "delta": round((_n((math.log(spot / K) + (RATE + sigma ** 2 / 2) * T) / (sigma * math.sqrt(T)))) if call else -_n(-((math.log(spot / K) + (RATE + sigma ** 2 / 2) * T) / (sigma * math.sqrt(T)))), 2),
                         "atm": K == atm})
     return out
+
+
+def smile_iv(atm_iv, moneyness, side="CE"):
+    """Volatility smile for short-dated Indian index options.
+
+    ATM sits near realised vol; wings rise steeply, puts more than calls, which is what
+    observed NSE weeklies show (ATM ~13-15%, 2% OTM puts ~30%+).
+    """
+    m = abs(float(moneyness))
+    wing = 60.0 if side == "PE" else 34.0
+    iv = atm_iv * (1.0 + wing * (m ** 0.9))
+    return min(0.60, max(0.06, iv))
+
+
+def atm_iv_from_realised(realised):
+    return min(0.45, max(0.13, realised * 1.3))

@@ -128,7 +128,10 @@ canvas{width:100%;height:270px;border-radius:16px}
     <h3 style="margin:0">Option chain &mdash; <span id="optname">-</span></h3>
     <div class="rowbtns">
      <select id="optUnd" style="max-width:240px"></select>
+     <select id="optExp"><option value="today">Expiry: today</option><option value="1d">tomorrow</option>
+      <option value="weekly" selected>this week</option><option value="monthly">monthly</option></select>
      <input id="optTarget" type="number" value="70" style="width:84px" title="premium in rupees">
+     <input id="optStrike" type="number" placeholder="any strike" style="width:104px">
      <button id="optFind">Find near premium</button>
     </div>
    </div>
@@ -438,7 +441,8 @@ async function loadOptUnds(){
 async function loadChain(){
  const tgt=$('optTarget').value||70;
  try{
-  const d=await (await fetch('/api/optionchain?underlying='+encodeURIComponent(OPT.und)+'&target='+tgt)).json();
+  const ex=$('optExp').value||'weekly', ks=($('optStrike').value||'').trim();
+  const d=await (await fetch('/api/optionchain?underlying='+encodeURIComponent(OPT.und)+'&target='+tgt+'&expiry='+ex+(ks?'&strike='+encodeURIComponent(ks):''))).json();
   if(d.error)throw new Error(d.error);
   OPT.data=d;OPT.und=d.underlying;
   d.strikes.forEach(r=>['ce','pe'].forEach(s=>{const o=r[s];
@@ -451,7 +455,7 @@ async function loadChain(){
 function renderChain(){
  const d=OPT.data;if(!d)return;
  $('optname').textContent=d.name;
- $('optmeta').innerHTML=`Spot <b>${inr(d.spot)}</b> · lot <b>${d.lot}</b> · expiry in <b>${d.expiry_days}d</b> · IV <b>${d.iv}%</b> · ATM <b>${d.atm}</b> · strike step ${d.step}`
+ $('optmeta').innerHTML=`Spot <b>${inr(d.spot)}</b> · lot <b>${d.lot}</b> · expiry <b>${d.expiry_kind} (${d.expiry_days}d)</b> · ATM IV <b>${d.atm_iv}%</b> · ATM <b>${d.atm}</b> · strikes ${d.step} apart`
   +(d.near_target?` · closest to ₹${$('optTarget').value}: <b>${d.near_target.strike} ${d.near_target.side}</b> at <b>${inr(d.near_target.price)}</b>`:'');
  const tgt=+($('optTarget').value||0);
  $('chain').innerHTML='<div class="jrow"><span class="jhead" style="flex:1">BUY CE</span><span class="jhead" style="flex:1;text-align:center">CE LTP / Δ</span><span class="jhead" style="flex:.7;text-align:center">Strike</span><span class="jhead" style="flex:1;text-align:center">PE LTP / Δ</span><span class="jhead" style="flex:1;text-align:right">BUY PE</span></div>'
@@ -460,14 +464,16 @@ function renderChain(){
    const held=(id)=>S.hold[id]?'on':'';
    return `<div class="jrow" ${r.atm?'style="background:rgba(47,79,216,.06);border-radius:10px"':''}>
     <span style="flex:1"><button data-opt="${r.ce.id}" class="go ${nearCE?'on':held(r.ce.id)}" style="padding:4px 10px;font-size:11.5px">BUY CE ${nearCE?'◆':''}</button></span>
-    <span style="flex:1;text-align:center"><b class="${r.ce.price>0?'':'dn'}">${inr(r.ce.price)}</b><br><span class="legend">Δ ${r.ce.delta} · ${inr(r.ce.contract)}/lot</span></span>
+    <span style="flex:1;text-align:center"><b class="${r.ce.price>0?'':'dn'}">${inr(r.ce.price)}</b><br><span class="legend">Δ ${r.ce.delta} · IV ${r.ce.iv}% · ${inr(r.ce.contract)}/lot</span></span>
     <span style="flex:.7;text-align:center" class="${r.atm?'up':''}"><b>${r.strike}</b>${r.atm?'<br><span class="legend">ATM</span>':''}</span>
-    <span style="flex:1;text-align:center"><b>${inr(r.pe.price)}</b><br><span class="legend">Δ ${r.pe.delta} · ${inr(r.pe.contract)}/lot</span></span>
+    <span style="flex:1;text-align:center"><b>${inr(r.pe.price)}</b><br><span class="legend">Δ ${r.pe.delta} · IV ${r.pe.iv}% · ${inr(r.pe.contract)}/lot</span></span>
     <span style="flex:1;text-align:right"><button data-opt="${r.pe.id}" class="dgr ${nearPE?'on':held(r.pe.id)}" style="padding:4px 10px;font-size:11.5px">BUY PE ${nearPE?'◆':''}</button></span></div>`}).join('')
-  +'<div class="legend" style="padding-top:8px">Premiums are model prices (Black-Scholes on live spot). 1 lot per click, 1% commission. ◆ marks options near your premium target.</div>';
+  +'<div class="legend" style="padding-top:8px">Model premiums (Black-Scholes with a volatility smile) from live spot — NSE blocks server-side option quotes, so these track the market but are not tick-for-tick. Pick expiry &quot;today&quot; for 0-DTE prices (~₹60-90 for NIFTY ATM). 1 lot per click, 1% commission. ◆ marks options near your premium target.</div>';
 }
 $('optFind').onclick=()=>{loadChain()};
 $('optUnd').onchange=()=>{OPT.und=$('optUnd').value;sel=OPT.und;loadChain();loadQuotes();renderList();showHead();run()};
+$('optExp').onchange=()=>loadChain();
+$('optStrike').onchange=()=>loadChain();;
 $('chain').onclick=e=>{
  const b=e.target.closest('button[data-opt]');
  if(!b)return;

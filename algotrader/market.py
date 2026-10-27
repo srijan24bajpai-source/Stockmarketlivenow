@@ -174,54 +174,100 @@ def _last_thursday_days():
     return days
 
 
-def _strike_step(spot):
-    if spot > 20000:
-        return 100
+STRIKE_STEP = {"NIFTY": 50, "BANKNIFTY": 100, "SENSEX": 100}
+
+
+def _strike_step(spot, prefix=""):
+    if prefix in STRIKE_STEP:
+        return STRIKE_STEP[prefix]
     if spot > 5000:
+        return 100
+    if spot > 2500:
         return 50
     if spot > 1000:
-        return 25
-    if spot > 400:
+        return 20
+    if spot > 500:
         return 10
-    return 5
+    if spot > 200:
+        return 5
+    return 2.5
 
 
-def option_chain(underlying, strikes=8, target=None):
-    """Chain for an index or any NIFTY 50 stock, priced from live spot + realised vol."""
+def _last_weekday_days(wd, is_index):
+    """Days to the last Tue (indices) / Thu (stocks) of this month; rolls to next month if past."""
+    now = time.gmtime()
+    y, m = now.tm_year, now.tm_mon
+    for add in (0, 1):
+        mm = m + add
+        yy = y + (mm - 1) // 12
+        mm = (mm - 1) % 12 + 1
+        first_next = time.mktime((yy + (mm == 12), (mm % 12) + 1, 1, 0, 0, 0, 0, 0, 0))
+        last = time.gmtime(first_next - 86400)
+        while last.tm_wday != wd:
+            first_next -= 86400
+            last = time.gmtime(first_next - 86400)
+        days = int((time.mktime(last[:3] + (0, 0, 0, 0, 0, 0)) + 86399 - time.time()) / 86400) + 1
+        if days >= 1:
+            return days
+    return 28
+
+
+def expiry_days(prefix, is_index, kind="weekly"):
+    if kind == "today":
+        return 0
+    if kind == "1d":
+        return 1
+    if kind == "monthly":
+        return _last_weekday_days(1 if is_index else 3, is_index)
+    wd = 3 if prefix == "SENSEX" else 1
+    d = (wd - time.gmtime().tm_wday) % 7
+    return d if d > 0 else 7
+
+
+def option_chain(underlying, strikes=8, target=None, expiry="weekly", extra=()):
+    """Chain for an index or any NIFTY 50 stock: 50-pt NIFTY ladder, smile-priced, any strike on request."""
     i = BY_ID.get(underlying.upper())
     if not i:
         raise KeyError(underlying)
     h = _chart(i["yahoo"], ttl=30)
     spot = h["price"]
-    sigma = opt.realized_vol(h["closes"])
     prefix = id_prefix(i["symbol"])
     lot = LOTS.get(prefix, 1 if i["type"] == "INDEX" else 500)
-    days = _expiry_days() if i["type"] == "INDEX" else _last_thursday_days()
-    step = _strike_step(spot)
+    days = expiry_days(prefix, i["type"] == "INDEX", expiry or "weekly")
+    atm_iv = opt.atm_iv_from_realised(opt.realized_vol(h["closes"]))
+    step = _strike_step(spot, prefix)
     atm = int(round(spot / step) * step)
-    rows = []
+    ks = {atm + k * step for k in range(-strikes, strikes + 1)}
+    for x in extra:
+        try:
+            ks.add(float(x))
+        except (TypeError, ValueError):
+            continue
     T = max(days, 0.5) / 365
-    for k in range(-strikes, strikes + 1):
-        K = atm + k * step
-        row = {"strike": K, "atm": K == atm, "ce": {}, "pe": {}}
+    rows = []
+    for K in sorted(ks, reverse=True):
+        m = K / spot - 1
+        row = {"strike": K if float(K).is_integer() else K, "atm": abs(K - atm) < 1e-9,
+               "moneyness": round(m * 100, 2), "ce": {}, "pe": {}}
         for side, call in (("ce", True), ("pe", False)):
-            px = round(opt.bs(spot, K, T, sigma, call), 2)
-            d1 = (math.log(spot / K) + (0.065 + sigma ** 2 / 2) * T) / (sigma * math.sqrt(T))
-            delta = round(_nd(d1) if call else _nd(d1) - 1, 2)
-            row[side] = {"id": "%s-%d-%s" % (prefix, K, side.upper()), "price": px,
-                         "delta": delta, "contract": round(px * lot, 2)}
+            iv = opt.smile_iv(atm_iv, m, "CE" if call else "PE")
+            px = round(opt.bs(spot, K, T, iv, call), 2)
+            d1 = (math.log(spot / K) + (0.065 + iv ** 2 / 2) * T) / (iv * math.sqrt(T))
+            row[side] = {"id": "%s-%s-%s" % (prefix, ("%d" % K) if float(K).is_integer() else K,
+                                                "CE" if call else "PE"),
+                         "price": px, "delta": round(_nd(d1) if call else _nd(d1) - 1, 2),
+                         "iv": round(iv * 100, 1), "contract": round(px * lot, 2)}
         rows.append(row)
-    rows.sort(key=lambda r: -r["strike"])
     near = None
     if target:
-        cand = [{"strike": r["strike"], "side": s.upper(), "price": r[s]["price"], "id": r[s]["id"]}
-                for r in rows for s in ("ce", "pe")]
+        cand = [{"strike": K, "side": s.upper(), "price": row[s]["price"], "id": row[s]["id"]}
+                for row in rows for K, s in ((row["strike"], "ce"), (row["strike"], "pe"))]
         if cand:
             near = min(cand, key=lambda c: abs(c["price"] - float(target)))
-    return {"underlying": i["symbol"], "id_prefix": prefix, "name": i["name"], "spot": spot, "lot": lot,
-            "expiry_days": days, "iv": round(sigma * 100, 1), "atm": atm, "step": step,
-            "strikes": rows, "near_target": near, "simulated": h["simulated"],
-            "currency": "INR"}
+    return {"underlying": i["symbol"], "id_prefix": prefix, "name": i["name"], "spot": spot,
+            "lot": lot, "expiry_days": days, "expiry_kind": expiry, "atm_iv": round(atm_iv * 100, 1),
+            "atm": atm, "step": step, "strikes": rows, "near_target": near,
+            "simulated": h["simulated"], "currency": "INR"}
 
 
 def _nd(x):
@@ -240,8 +286,10 @@ def option_instrument(oid):
     if not base:
         raise KeyError(oid)
     h = _chart(base["yahoo"], ttl=30)
-    sigma = opt.realized_vol(h["closes"])
-    days = _expiry_days() if base["type"] == "INDEX" else _last_thursday_days()
+    atm_iv = opt.atm_iv_from_realised(opt.realized_vol(h["closes"]))
+    sigma = opt.smile_iv(atm_iv, strike / h["price"] - 1, side)
+    pref = id_prefix(base["symbol"])
+    days = expiry_days(pref, base["type"] == "INDEX", "weekly")
     lot = LOTS.get(und, LOTS.get(sym, 1 if base["type"] == "INDEX" else 500))
     return {"symbol": oid.upper(), "name": "%s %d %s" % (und, strike, side), "sector": "Options",
             "market": "IN", "exchange": "F&O", "type": "OPT", "yahoo": base["yahoo"],

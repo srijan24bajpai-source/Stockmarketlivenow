@@ -70,7 +70,20 @@ Calls are mechanical model output on delayed data, not advice.
   to it on both sides - handy for buying cheap OTM options around Rs 70.
 - One click buys one lot at the model premium, 1% commission, and the position joins the same
   profit box, day book and HOLD/SELL advice as everything else.
-- Premiums are Black-Scholes prices from live spot and realised volatility, not exchange quotes.
+- **Real strike ladders:** NIFTY moves in 50-point strikes (22,550 / 22,650 / 22,750 / 23,100 all
+  exist), BANK NIFTY and SENSEX in 100s, stocks by price band. 21 strikes are shown, and the
+  `any strike` box prices and trades a strike outside the ladder (e.g. 24,100 PE).
+- **Volatility smile, not flat vol:** ATM IV = realised vol x 1.3 (floor 13%), with wings rising
+  roughly 34% per unit of moneyness for calls and 60% for puts. That reproduces the shape of
+  Indian weeklies (ATM ~15%, 2% OTM puts ~30%+).
+- **Expiry choice:** today (0 DTE), tomorrow, this week, monthly. 0 DTE gives the ~Rs 60-90 ATM
+  premiums you see on expiry-day screens.
+- Model vs market on a recent NIFTY session (spot ~22,730, 0 DTE): 22,750 CE Rs 57 vs Rs 71 quoted,
+  23,100 CE Rs 13 vs Rs 15, 22,350 PE Rs 31 vs Rs 51, 24,100 PE Rs 1,366 vs Rs 1,502. Same ballpark,
+  not tick-for-tick.
+- Premiums are **model** prices: NSE blocks server-side option quotes (verified: the public
+  option-chain API returns an error page from this host, and Yahoo has no NSE option symbols),
+  so exact exchange LTPs need a paid feed such as Kite, Upstox or Dhan.
 
 ## Daily profit / loss book
 
