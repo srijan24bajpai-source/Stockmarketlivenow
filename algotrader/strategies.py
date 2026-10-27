@@ -50,4 +50,59 @@ def rsi_mean_reversion(prices, period=14, buy_below=30, sell_above=70):
     return sig
 
 
-STRATEGIES = {"sma_crossover": sma_crossover, "rsi": rsi_mean_reversion}
+
+
+
+def ema(prices, n):
+    out, k, prev = [], 2 / (n + 1), prices[0]
+    for p in prices:
+        prev = p * k + prev * (1 - k)
+        out.append(prev)
+    return out
+
+
+def macd(prices, fast=12, slow=26, signal=9):
+    f, s = ema(prices, fast), ema(prices, slow)
+    line = [a - b for a, b in zip(f, s)]
+    sig = ema(line, signal)
+    return [1 if l > g else 0 for l, g in zip(line, sig)]
+
+
+def bollinger_breakout(prices, n=20, k=2):
+    out, pos = [], 0
+    for i in range(len(prices)):
+        if i >= n:
+            w = prices[i - n:i]
+            m = sum(w) / n
+            sd = (sum((x - m) ** 2 for x in w) / n) ** 0.5
+            if prices[i] > m + k * sd:
+                pos = 1
+            elif prices[i] < m:
+                pos = 0
+        out.append(pos)
+    return out
+
+
+def donchian(prices, entry=20, exit_=10):
+    out, pos = [], 0
+    for i in range(len(prices)):
+        if i >= entry and prices[i] > max(prices[i - entry:i]):
+            pos = 1
+        elif i >= exit_ and prices[i] < min(prices[i - exit_:i]):
+            pos = 0
+        out.append(pos)
+    return out
+
+
+def momentum(prices, n=60):
+    return [1 if i >= n and prices[i] > prices[i - n] else 0 for i in range(len(prices))]
+
+
+STRATEGIES = {
+    "sma_crossover": sma_crossover,
+    "rsi": rsi_mean_reversion,
+    "macd": macd,
+    "bollinger": bollinger_breakout,
+    "donchian": donchian,
+    "momentum": momentum,
+}

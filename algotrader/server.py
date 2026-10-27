@@ -27,6 +27,19 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/stocks":
             return self._send(200, json.dumps(STOCKS))
         q = parse_qs(u.query)
+        if u.path == "/api/fx":
+            return self._send(200, json.dumps({"USDINR": market.usdinr()}))
+        if u.path == "/api/best":
+            symbol = q.get("symbol", ["AAPL"])[0].upper()
+            if symbol not in market.BY_SYMBOL:
+                return self._send(400, json.dumps({"error": "unknown symbol"}))
+            key = ("best", symbol)
+            hit = market._cache.get(key)
+            if not (hit and __import__("time").time() - hit[0] < 300):
+                prices = market.history(symbol)["closes"]
+                best = max(STRATEGIES, key=lambda n: backtest(prices, STRATEGIES[n](prices))["return_pct"])
+                hit = market._cache[key] = (__import__("time").time(), best)
+            return self._send(200, json.dumps({"best": hit[1]}))
         if u.path == "/api/quotes":
             syms = [x.strip().upper() for x in q.get("symbols", [""])[0].split(",") if x.strip()]
             return self._send(200, json.dumps(market.quotes(syms)))

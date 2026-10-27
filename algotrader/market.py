@@ -56,7 +56,7 @@ def history(symbol):
 
 
 def quote(symbol):
-    h = _fetch(symbol, "5d", "1d", 20)
+    h = _fetch(symbol, "5d", "1d", 8)
     prev = h["closes"][-2] if len(h["closes"]) > 1 else h["price"]
     chg = (h["price"] / prev - 1) * 100 if prev else 0
     return {"symbol": symbol, "price": h["price"], "change_pct": round(chg, 2),
@@ -67,3 +67,21 @@ def quotes(symbols):
     symbols = [s for s in symbols if s in BY_SYMBOL][:30]
     with ThreadPoolExecutor(max_workers=10) as ex:
         return list(ex.map(quote, symbols))
+
+
+def usdinr():
+    """Live USD->INR, cached 5 min, fallback 83.5."""
+    key = ("FX", "1d", "1d")
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    rate = 83.5
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/INR=X?range=1d&interval=1d"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            rate = round(json.load(r)["chart"]["result"][0]["meta"]["regularMarketPrice"], 2)
+    except Exception:
+        pass
+    _cache[key] = (time.time(), rate)
+    return rate
