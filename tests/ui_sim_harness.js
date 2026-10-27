@@ -28,12 +28,22 @@ global.fetch = async url => {
   if (url.startsWith('/api/recommendations') || url.startsWith('/api/recommend'))
     return { json: async () => [{ symbol: 'AAPL', action: 'BUY', confidence: 72, price: P, target: P * 1.06, stop: P * 0.975,
       reward_pct: 6, risk_pct: 2.5, rr: 2.4, reasons: ['4 of 6 strategies bullish'], best_strategy: 'momentum' }] };
+  if (url.startsWith('/api/optionunderlyings'))
+    return { json: async () => [
+      { symbol: '^NSEI', name: 'NIFTY 50', type: 'INDEX', lot: 75, nifty50: false },
+      { symbol: 'RELIANCE', name: 'Reliance Industries', type: 'STOCK', lot: 500, nifty50: true }] };
+  if (url.startsWith('/api/optionchain'))
+    return { json: async () => ({ underlying: 'RELIANCE', id_prefix: 'RELIANCE', name: 'Reliance Industries',
+      spot: 1200, lot: 500, expiry_days: 5, iv: 22, atm: 1200, step: 25, simulated: false,
+      strikes: [{ strike: 1200, atm: true, ce: { id: 'RELIANCE-1200-CE', price: 70, delta: 0.5, contract: 35000 },
+        pe: { id: 'RELIANCE-1200-PE', price: 65, delta: -0.5, contract: 32500 } }],
+      near_target: { strike: 1200, side: 'CE', price: 70, id: 'RELIANCE-1200-CE' } }) };
   if (url.startsWith('/api/scan')) return { json: async () => [] };
   if (url.startsWith('/api/backtest')) return { json: async () => ({ return_pct: 5, max_drawdown_pct: 2, sharpe: 1, num_trades: 3, last: P, index: [100, 101], equity: [100, 101], trades: [] }) };
   throw new Error('unexpected ' + url);
 };
 const page = process.argv[2];
-vm.runInThisContext(fs.readFileSync(page, 'utf8') + '\n;globalThis.__S=()=>S;globalThis.__FX=()=>FX;globalThis.__tickBot=tickBot;globalThis.__tick=tick;globalThis.__startAlgo=startAlgo;');
+vm.runInThisContext(fs.readFileSync(page, 'utf8') + '\n;globalThis.__S=()=>S;globalThis.__INSTR=()=>INSTR;globalThis.__Q=()=>Q;globalThis.__loadChain=loadChain;globalThis.__openTrade=openTrade;globalThis.__closeTrade=closeTrade;globalThis.__FX=()=>FX;globalThis.__tickBot=tickBot;globalThis.__tick=tick;globalThis.__startAlgo=startAlgo;');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   await sleep(120);
@@ -74,6 +84,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const notional = fb.qty * fb.entry * 75;
   check('futures trade on 12% margin, not full notional', fb.pos === 1 && fb.blocked < notional * 0.2,
     'blocked ₹' + fb.blocked.toFixed(0) + ' of notional ₹' + notional.toFixed(0));
+  await globalThis.__loadChain();
+  const INSTR = globalThis.__INSTR(), Q = globalThis.__Q();
+  check('option chain registers a tradeable instrument', !!INSTR['RELIANCE-1200-CE'] && Q['RELIANCE-1200-CE'].price === 70,
+    'premium \u20b970 x lot ' + INSTR['RELIANCE-1200-CE'].unit);
+  const bought = globalThis.__openTrade('RELIANCE-1200-CE', 'LONG', 1, 'OPTION BUY', null);
+  const h = S.hold['RELIANCE-1200-CE'];
+  check('buys one lot at premium x lot', bought && !!h && Math.abs(h.blocked - 35000) < 1, 'blocked \u20b9' + (h ? h.blocked.toFixed(0) : '-'));
+  globalThis.__closeTrade(S.hold['RELIANCE-1200-CE'], 'TEST CLOSE');
+  check('option position closes and books to the day book', !S.hold['RELIANCE-1200-CE'] && !!S.day.bySym['RELIANCE-1200-CE']);
   const failed = ok.filter(x => !x).length;
   console.log(failed ? 'RESULT FAIL' : 'RESULT PASS');
   process.exit(failed ? 1 : 0);

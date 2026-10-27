@@ -82,6 +82,7 @@ canvas{width:100%;height:270px;border-radius:16px}
  <button class="tab on" data-m="IN">India &middot; NSE + BSE + F&amp;O</button>
  <button class="tab" data-m="US">US stocks</button>
  <button class="tab" data-m="CRYPTO">Bitcoin &amp; crypto</button>
+ <button class="tab" data-m="OPTIONS">Options chain &middot; NIFTY 50</button>
  <button class="tab" data-m="BEST">Best trades now</button>
 </nav>
 <main>
@@ -121,6 +122,18 @@ canvas{width:100%;height:270px;border-radius:16px}
     <div class="sw"><span>Auto-transfer</span><button class="tg inset" id="auto"><i></i></button></div>
     <button class="dgr" id="closeall">Close all positions</button>
    </div>
+  </div>
+  <div class="card inset" id="optcard" style="display:none;margin-bottom:16px">
+   <div class="rowbtns" style="justify-content:space-between">
+    <h3 style="margin:0">Option chain &mdash; <span id="optname">-</span></h3>
+    <div class="rowbtns">
+     <select id="optUnd" style="max-width:240px"></select>
+     <input id="optTarget" type="number" value="70" style="width:84px" title="premium in rupees">
+     <button id="optFind">Find near premium</button>
+    </div>
+   </div>
+   <div class="legend" id="optmeta" style="margin:6px 0"></div>
+   <div class="jtable" id="chain"></div>
   </div>
   <div class="card inset" style="margin-bottom:16px">
    <div class="rowbtns" style="justify-content:space-between">
@@ -170,7 +183,7 @@ const now=()=>new Date().toLocaleTimeString();
 let ALL=[],INSTR={},sel='RELIANCE',market='IN',ftype='All',term='',Q={},REC={},FX=95.2,SUGG=[],BESTC=[];
 let S=JSON.parse(localStorage.getItem('sim3')||'null')||{cash:CAP,bank:0,gross:0,net:0,fee:0,pending:0,sells:0,wins:0,auto:false,bots:{},hold:{},fills:[]};
 S.day=S.day||{key:'',gross:0,fee:0,net:0,trades:0,wins:0,losses:0,bySym:{}};S.days=S.days||[];S.bySym=S.bySym||{};
-let BOOKALL=false;
+let BOOKALL=false,OPTUNDS=[],OPT={und:'^NSEI',data:null};
 const save=()=>localStorage.setItem('sim3',JSON.stringify(S));
 const curOf=s=>(INSTR[s]||{}).currency||'INR';
 const px=s=>{const q=Q[s];if(!q)return null;return curOf(s)==='INR'?q.price:q.price*FX};
@@ -250,6 +263,7 @@ $('closeall').onclick=()=>{Object.keys(S.hold).forEach(k=>closeTrade(S.hold[k],'
 /* ---------------- list ---------------- */
 function items(){
  const t=term.toLowerCase();
+ if(market==='OPTIONS')return OPTUNDS.filter(i=>i.symbol.toLowerCase().includes(t)||i.name.toLowerCase().includes(t));
  let rows=ALL.filter(i=>i.market===market);
  if(ftype!=='All')rows=rows.filter(i=>i.type===ftype);
  return rows.filter(i=>i.symbol.toLowerCase().includes(t)||i.name.toLowerCase().includes(t));
@@ -290,7 +304,7 @@ function renderList(){
 }
 $('list').onclick=e=>{const r=e.target.closest('.row');if(r){sel=r.dataset.s;renderList();showAll();run();loadQuotes()}};
 $('q').oninput=e=>{term=e.target.value;renderList();clearTimeout(window.qt);window.qt=setTimeout(loadQuotes,350)};
-const TYPES={IN:['All','STOCK','INDEX','FUT','OPT'],US:['All'],CRYPTO:['All'],BEST:[]};
+const TYPES={IN:['All','STOCK','INDEX','FUT','OPT'],US:['All'],CRYPTO:['All'],BEST:[],OPTIONS:[]};
 function chips(){
  const t=TYPES[market]||['All'];
  const names={All:'All',STOCK:'Stocks',INDEX:'Indices',FUT:'Futures',OPT:'Options'};
@@ -415,6 +429,53 @@ function manual(side){
  if(!openTrade(sel,side,q,'MANUAL',null))return alert('Not enough free capital.');
  save();renderAll();
 }
+async function loadOptUnds(){
+ if(OPTUNDS.length)return;
+ try{OPTUNDS=await (await fetch('/api/optionunderlyings')).json();}catch(e){OPTUNDS=[]}
+ $('optUnd').innerHTML=OPTUNDS.map(u=>`<option value="${u.symbol}">${u.type==='INDEX'?'INDEX':u.nifty50?'NIFTY50':'STOCK'} · ${u.name} (lot ${u.lot})</option>`).join('');
+ $('optUnd').value=OPT.und;
+}
+async function loadChain(){
+ const tgt=$('optTarget').value||70;
+ try{
+  const d=await (await fetch('/api/optionchain?underlying='+encodeURIComponent(OPT.und)+'&target='+tgt)).json();
+  if(d.error)throw new Error(d.error);
+  OPT.data=d;OPT.und=d.underlying;
+  d.strikes.forEach(r=>['ce','pe'].forEach(s=>{const o=r[s];
+   INSTR[o.id]={symbol:o.id,name:d.name+' '+r.strike+' '+s.toUpperCase(),market:'IN',exchange:'F&O',type:'OPT',
+    unit:d.lot,margin:1,currency:'INR',underlying:d.name,strike:r.strike,side:s.toUpperCase()};
+   Q[o.id]={symbol:o.id,price:o.price,change_pct:0,currency:'INR',simulated:d.simulated}}));
+  renderChain();
+ }catch(e){$('optmeta').textContent='Chain unavailable: '+e.message}
+}
+function renderChain(){
+ const d=OPT.data;if(!d)return;
+ $('optname').textContent=d.name;
+ $('optmeta').innerHTML=`Spot <b>${inr(d.spot)}</b> · lot <b>${d.lot}</b> · expiry in <b>${d.expiry_days}d</b> · IV <b>${d.iv}%</b> · ATM <b>${d.atm}</b> · strike step ${d.step}`
+  +(d.near_target?` · closest to ₹${$('optTarget').value}: <b>${d.near_target.strike} ${d.near_target.side}</b> at <b>${inr(d.near_target.price)}</b>`:'');
+ const tgt=+($('optTarget').value||0);
+ $('chain').innerHTML='<div class="jrow"><span class="jhead" style="flex:1">BUY CE</span><span class="jhead" style="flex:1;text-align:center">CE LTP / Δ</span><span class="jhead" style="flex:.7;text-align:center">Strike</span><span class="jhead" style="flex:1;text-align:center">PE LTP / Δ</span><span class="jhead" style="flex:1;text-align:right">BUY PE</span></div>'
+  +d.strikes.map(r=>{
+   const nearCE=tgt&&Math.abs(r.ce.price-tgt)<Math.max(2,tgt*0.08), nearPE=tgt&&Math.abs(r.pe.price-tgt)<Math.max(2,tgt*0.08);
+   const held=(id)=>S.hold[id]?'on':'';
+   return `<div class="jrow" ${r.atm?'style="background:rgba(47,79,216,.06);border-radius:10px"':''}>
+    <span style="flex:1"><button data-opt="${r.ce.id}" class="go ${nearCE?'on':held(r.ce.id)}" style="padding:4px 10px;font-size:11.5px">BUY CE ${nearCE?'◆':''}</button></span>
+    <span style="flex:1;text-align:center"><b class="${r.ce.price>0?'':'dn'}">${inr(r.ce.price)}</b><br><span class="legend">Δ ${r.ce.delta} · ${inr(r.ce.contract)}/lot</span></span>
+    <span style="flex:.7;text-align:center" class="${r.atm?'up':''}"><b>${r.strike}</b>${r.atm?'<br><span class="legend">ATM</span>':''}</span>
+    <span style="flex:1;text-align:center"><b>${inr(r.pe.price)}</b><br><span class="legend">Δ ${r.pe.delta} · ${inr(r.pe.contract)}/lot</span></span>
+    <span style="flex:1;text-align:right"><button data-opt="${r.pe.id}" class="dgr ${nearPE?'on':held(r.pe.id)}" style="padding:4px 10px;font-size:11.5px">BUY PE ${nearPE?'◆':''}</button></span></div>`}).join('')
+  +'<div class="legend" style="padding-top:8px">Premiums are model prices (Black-Scholes on live spot). 1 lot per click, 1% commission. ◆ marks options near your premium target.</div>';
+}
+$('optFind').onclick=()=>{loadChain()};
+$('optUnd').onchange=()=>{OPT.und=$('optUnd').value;sel=OPT.und;loadChain();loadQuotes();renderList();showHead();run()};
+$('chain').onclick=e=>{
+ const b=e.target.closest('button[data-opt]');
+ if(!b)return;
+ const id=b.dataset.opt;
+ if(S.hold[id])return alert(id+' is already held. Close it first.');
+ if(!openTrade(id,'LONG',1,'OPTION BUY',null))return alert('Not enough free capital for 1 lot of '+id+'.');
+ save();renderAll();
+};
 function fmtSign(v){return (v>=0?'+':'-')+inr(Math.abs(v))}
 function renderDay(){
  ensureDay();
@@ -474,8 +535,10 @@ async function loadScan(){
 }
 /* ---------------- boot ---------------- */
 function setTab(m){market=m;ftype='All';chips();renderList();renderSugg();loadQuotes();
+ $('optcard').style.display=m==='OPTIONS'?'block':'none';
  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.m===m));
  if(m==='BEST')loadScan();
+ if(m==='OPTIONS'){sel=OPT.und;loadOptUnds().then(()=>{$('optUnd').value=OPT.und;loadChain();loadQuotes();run()})}
  if(m==='BEST'){const f=ALL.filter(i=>i.market==='IN')[0];if(f&&!INSTR[sel])sel=f.symbol}}
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setTab(t.dataset.m));
 async function boot(){
@@ -483,7 +546,7 @@ async function boot(){
  ALL.forEach(i=>INSTR[i.symbol]=i);
  sel=ALL.find(i=>i.symbol==='RELIANCE')?  'RELIANCE' : (ALL[0]&&ALL[0].symbol);
  chips();renderList();showHead();showAll();renderMoney();ensureDay();
- await loadFX();loadQuotes();run();loadScan();
+ await loadFX();loadQuotes();run();loadScan();loadOptUnds();
  Object.values(S.bots).forEach(b=>tickBot(b));
 }
 boot();

@@ -1,24 +1,26 @@
 """Instrument universe: India (NSE+BSE equities, indices, futures, options), US, crypto."""
 
 IN_NSE = """
-RELIANCE|Reliance Industries|Energy;TCS|Tata Consultancy Services|IT;HDFCBANK|HDFC Bank|Banking
-INFY|Infosys|IT;ICICIBANK|ICICI Bank|Banking;HINDUNILVR|Hindustan Unilever|FMCG;ITC|ITC|FMCG
-SBIN|State Bank of India|Banking;BHARTIARTL|Bharti Airtel|Telecom;KOTAKBANK|Kotak Mahindra Bank|Banking
-LT|Larsen & Toubro|Infra;AXISBANK|Axis Bank|Banking;BAJFINANCE|Bajaj Finance|NBFC
-ASIANPAINT|Asian Paints|FMCG;MARUTI|Maruti Suzuki|Auto;SUNPHARMA|Sun Pharma|Pharma;TITAN|Titan|Consumer
-WIPRO|Wipro|IT;HCLTECH|HCL Technologies|IT;NTPC|NTPC|Power;ONGC|ONGC|Energy;TATAMOTORS|Tata Motors|Auto
-TATASTEEL|Tata Steel|Metals;ADANIENT|Adani Enterprises|Conglomerate;ZOMATO|Eternal (Zomato)|Consumer
-POWERGRID|Power Grid|Power;ADANIPORTS|Adani Ports|Infra;COALINDIA|Coal India|Mining;BPCL|BPCL|Energy
-IOC|Indian Oil|Energy;GAIL|GAIL|Energy;DLF|DLF|Realty;JSWSTEEL|JSW Steel|Metals;GRASIM|Grasim|Cement
-CIPLA|Cipla|Pharma;DRREDDY|Dr Reddy's|Pharma;DIVISLAB|Divi's Labs|Pharma;EICHERMOT|Eicher Motors|Auto
-HEROMOTOCO|Hero MotoCorp|Auto;BAJAJ-AUTO|Bajaj Auto|Auto;M&M|Mahindra & Mahindra|Auto
-TATAPOWER|Tata Power|Power;TECHM|Tech Mahindra|IT;ULTRACEMCO|UltraTech Cement|Cement;VEDL|Vedanta|Metals
-HAL|Hindustan Aeronautics|Defence;IRCTC|IRCTC|Travel;PNB|Punjab National Bank|Banking
-CANBK|Canara Bank|Banking;BANKBARODA|Bank of Baroda|Banking;INDUSINDBK|IndusInd Bank|Banking
-SBILIFE|SBI Life|Insurance;HDFCLIFE|HDFC Life|Insurance;PIDILITIND|Pidilite|Chemicals
-DABUR|Dabur|FMCG;BRITANNIA|Britannia|FMCG;NESTLEIND|Nestle India|FMCG;HAVELLS|Havells|Consumer
-SIEMENS|Siemens India|Capital Goods;BEL|Bharat Electronics|Defence;YESBANK|Yes Bank|Banking
-IDFCFIRSTB|IDFC First Bank|Banking;TATACONSUM|Tata Consumer|FMCG;SHRIRAMFIN|Shriram Finance|NBFC
+RELIANCE|Reliance Industries|Energy;HDFCBANK|HDFC Bank|Banking;ICICIBANK|ICICI Bank|Banking;INFY|Infosys|IT
+TCS|Tata Consultancy Services|IT;BHARTIARTL|Bharti Airtel|Telecom;ITC|ITC|FMCG;SBIN|State Bank of India|Banking
+LT|Larsen & Toubro|Infra;KOTAKBANK|Kotak Mahindra Bank|Banking;HINDUNILVR|Hindustan Unilever|FMCG;AXISBANK|Axis Bank|Banking
+BAJFINANCE|Bajaj Finance|NBFC;MARUTI|Maruti Suzuki|Auto;M&M|Mahindra & Mahindra|Auto;SUNPHARMA|Sun Pharma|Pharma
+ULTRACEMCO|UltraTech Cement|Cement;TITAN|Titan|Consumer;NTPC|NTPC|Power;POWERGRID|Power Grid|Power
+TATAMOTORS|Tata Motors|Auto;TATASTEEL|Tata Steel|Metals;JSWSTEEL|JSW Steel|Metals;ADANIENT|Adani Enterprises|Conglomerate
+ADANIPORTS|Adani Ports|Infra;COALINDIA|Coal India|Mining;ONGC|ONGC|Energy;BPCL|BPCL|Energy;GRASIM|Grasim|Cement
+HINDALCO|Hindalco|Metals;DRREDDY|Dr Reddy's|Pharma;CIPLA|Cipla|Pharma;APOLLOHOSP|Apollo Hospitals|Healthcare
+BAJAJFINSV|Bajaj Finserv|NBFC;BAJAJ-AUTO|Bajaj Auto|Auto;EICHERMOT|Eicher Motors|Auto;HEROMOTOCO|Hero MotoCorp|Auto
+BRITANNIA|Britannia|FMCG;NESTLEIND|Nestle India|FMCG;TATACONSUM|Tata Consumer|FMCG;SBILIFE|SBI Life|Insurance
+HDFCLIFE|HDFC Life|Insurance;TECHM|Tech Mahindra|IT;WIPRO|Wipro|IT;ASIANPAINT|Asian Paints|FMCG
+TRENT|Trent|Retail;INDUSINDBK|IndusInd Bank|Banking;SHRIRAMFIN|Shriram Finance|NBFC;ETERNAL|Eternal (Zomato)|Consumer
+HCLTECH|HCL Technologies|IT
+"""
+IN_NSE_EXTRA = """
+HAL|Hindustan Aeronautics|Defence;BEL|Bharat Electronics|Defence;IRCTC|IRCTC|Travel;PNB|Punjab National Bank|Banking
+CANBK|Canara Bank|Banking;BANKBARODA|Bank of Baroda|Banking;DLF|DLF|Realty;VEDL|Vedanta|Metals;GAIL|GAIL|Energy
+IOC|Indian Oil|Energy;TATAPOWER|Tata Power|Power;PIDILITIND|Pidilite|Chemicals;DABUR|Dabur|FMCG
+HAVELLS|Havells|Consumer;SIEMENS|Siemens India|Capital Goods;YESBANK|Yes Bank|Banking;IDFCFIRSTB|IDFC First Bank|Banking
+ZOMATO|Zomato (old symbol)|Consumer;DIVISLAB|Divi's Labs|Pharma;JUBLFOOD|Jubilant FoodWorks|Consumer;POLYCAB|Polycab|Capital Goods
 """
 IN_BSE = """
 500325|Reliance Industries (BSE)|Energy;532540|TCS (BSE)|IT;500180|HDFC Bank (BSE)|Banking
@@ -73,7 +75,11 @@ def _equities(rows, market, yahoo_suffix):
 
 
 INSTRUMENTS = []
-INSTRUMENTS += _equities(_rows(IN_NSE, exchange="NSE"), "IN", ".NS")
+NIFTY50 = _rows(IN_NSE, exchange="NSE")
+for r in NIFTY50:
+    r["nifty50"] = True
+INSTRUMENTS += _equities(NIFTY50, "IN", ".NS")
+INSTRUMENTS += _equities(_rows(IN_NSE_EXTRA, exchange="NSE", nifty50=False), "IN", ".NS")
 INSTRUMENTS += _equities(_rows(IN_BSE, exchange="BSE"), "IN", ".BO")
 for sym, name, sec in INDICES:
     INSTRUMENTS.append(dict(symbol=sym, name=name, sector=sec, market="IN", exchange="NSE",
@@ -92,5 +98,20 @@ for i in INSTRUMENTS:
 
 BY_ID = {i["symbol"]: i for i in INSTRUMENTS}
 OPT_UNDERLYINGS = {u: (y, l) for u, y, l in OPT_UND}
+# approximate F&O lot sizes (contracts are simulated)
+LOTS = {"NIFTY": 75, "BANKNIFTY": 15, "SENSEX": 10,
+        "RELIANCE": 500, "HDFCBANK": 550, "ICICIBANK": 700, "INFY": 400, "TCS": 175,
+        "SBIN": 750, "BHARTIARTL": 475, "ITC": 1600, "LT": 150, "KOTAKBANK": 400,
+        "HINDUNILVR": 300, "AXISBANK": 625, "BAJFINANCE": 125, "MARUTI": 50, "M&M": 350,
+        "SUNPHARMA": 350, "ULTRACEMCO": 50, "TITAN": 175, "NTPC": 1500, "POWERGRID": 1900,
+        "TATAMOTORS": 800, "TATASTEEL": 5500, "JSWSTEEL": 675, "ADANIENT": 300,
+        "ADANIPORTS": 475, "COALINDIA": 1350, "ONGC": 2250, "BPCL": 1800, "GRASIM": 250,
+        "HINDALCO": 1075, "DRREDDY": 625, "CIPLA": 375, "APOLLOHOSP": 125, "BAJAJFINSV": 500,
+        "BAJAJ-AUTO": 75, "EICHERMOT": 175, "HEROMOTOCO": 300, "BRITANNIA": 200, "NESTLEIND": 250,
+        "TATACONSUM": 550, "SBILIFE": 375, "HDFCLIFE": 1100, "TECHM": 600, "WIPRO": 3000,
+        "ASIANPAINT": 200, "TRENT": 100, "INDUSINDBK": 500, "SHRIRAMFIN": 300, "ETERNAL": 2425,
+        "DIVISLAB": 100, "HCLTECH": 350}
+
+
 META = {s: {"symbol": s, "name": i["name"], "sector": i["sector"], "exchange": i["exchange"],
             "market": i["market"], "type": i["type"]} for s, i in BY_ID.items()}

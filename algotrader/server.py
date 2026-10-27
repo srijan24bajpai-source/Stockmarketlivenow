@@ -51,9 +51,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/fx":
             return self._send(200, json.dumps({"USDINR": market.usdinr()}))
         if path == "/api/optionchain":
-            name = arg("underlying", "NIFTY")
-            rows = [o for o in market.instruments("IN")
-                    if o["type"] == "OPT" and o.get("underlying") == name]
+            tgt = arg("target") or None
+            return self._send(200, json.dumps(
+                market.option_chain(arg("underlying", "NIFTY"), int(arg("strikes", "8")), tgt)))
+        if path == "/api/optionunderlyings":
+            rows = [{"symbol": i["symbol"], "name": i["name"], "type": i["type"],
+                     "lot": market.LOTS.get(market.id_prefix(i["symbol"]),
+                                           1 if i["type"] == "INDEX" else 500),
+                     "nifty50": i.get("nifty50", False)}
+                    for i in market.INSTRUMENTS
+                    if i["market"] == "IN" and i["type"] in ("INDEX", "STOCK")
+                    and i["symbol"] != "^INDIAVIX"]
+            order = {"INDEX": 0, "STOCK": 1}
+            rows.sort(key=lambda r: (order.get(r["type"], 2), not r["nifty50"], r["symbol"]))
             return self._send(200, json.dumps(rows))
         if path == "/api/best":
             sid = arg("symbol").upper()

@@ -60,6 +60,18 @@ carries a live call from `/api/recommend`, plus a confidence score, target, stop
 
 Calls are mechanical model output on delayed data, not advice.
 
+## Options window (dedicated tab)
+
+- Underlyings: NIFTY 50, BANK NIFTY, SENSEX plus **all 50 NIFTY 50 stocks** (stock options use
+  monthly expiry, indices weekly). Every constituent carries its real F&O lot size
+  (RELIANCE 500, HDFCBANK 550, TCS 175 ...).
+- The chain shows 17 strikes around ATM with CE/PE premium, delta and contract value per lot.
+- **Premium target finder:** type a premium (default 70) and it marks the strikes trading closest
+  to it on both sides - handy for buying cheap OTM options around Rs 70.
+- One click buys one lot at the model premium, 1% commission, and the position joins the same
+  profit box, day book and HOLD/SELL advice as everything else.
+- Premiums are Black-Scholes prices from live spot and realised volatility, not exchange quotes.
+
 ## Daily profit / loss book
 
 A dedicated book window shows, per share, what was booked **today**: trades, gross P&L,
