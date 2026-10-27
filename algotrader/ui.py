@@ -61,6 +61,10 @@ canvas{width:100%;height:270px;border-radius:16px}
 .tg{width:54px;height:28px;border-radius:99px;position:relative;padding:0}
 .tg i{position:absolute;top:4px;left:5px;width:20px;height:20px;border-radius:50%;background:var(--bg);box-shadow:3px 3px 6px var(--lo),-2px -2px 5px var(--hi);transition:.2s}
 .tg.on i{left:29px;background:var(--up)}
+.recbox{margin-top:14px;padding:14px 16px;border-radius:16px;box-shadow:inset 5px 5px 12px var(--lo),inset -5px -5px 12px var(--hi)}
+.recrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px}
+.pillx{font-size:11px;font-weight:900;padding:4px 11px;border-radius:99px;letter-spacing:.5px;color:#fff;text-transform:uppercase}
+.buy{background:var(--up)}.sell{background:var(--dn)}.wait{background:#7c86a0}
 .mk{font-size:9.5px;font-weight:900;letter-spacing:.5px;padding:2px 6px;border-radius:5px;background:rgba(47,79,216,.12);color:var(--acc)}
 </style></head><body>
 <header class="raised">
@@ -101,6 +105,11 @@ canvas{width:100%;height:270px;border-radius:16px}
     <button class="go" id="quick">Start algo</button>
    </div>
   </div>
+  <div class="recbox">
+   <div class="recrow"><span class="pillx wait" id="recact">...</span><b id="recsym">-</b><span class="legend" id="recmeta"></span></div>
+   <div class="legend" id="recreasons" style="margin-top:6px"></div>
+   <div class="rowbtns" style="margin-top:8px"><button class="go" id="tradecall">Trade this call</button><span class="legend">Model suggestion, not financial advice.</span></div>
+  </div>
   <div class="profitbox">
    <h3>Profit box &mdash; booked in real time</h3>
    <div class="pgrid" id="pbox"></div>
@@ -135,6 +144,7 @@ canvas{width:100%;height:270px;border-radius:16px}
     <div class="cfg"><label>Qty / lots<input id="mq" type="number" value="10" min="1" step="1"></label></div>
     <div class="rowbtns"><button class="go" id="buy">BUY / LONG</button><button class="dgr" id="short">SHORT</button><button id="close1">CLOSE</button></div>
     <div class="legend" id="hold" style="margin-top:8px"></div>
+    <div class="legend" id="sidehint" style="margin-top:8px;font-weight:700"></div>
     <h3 style="margin-top:14px">Recent fills</h3><div id="fills"></div>
    </div>
   </div>
@@ -146,7 +156,7 @@ const $=id=>document.getElementById(id);
 const CAP=1e7, FEE=0.01, MAXBOTS=8;
 const inr=v=>'\u20b9'+Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:2});
 const now=()=>new Date().toLocaleTimeString();
-let ALL=[],INSTR={},sel='RELIANCE',market='IN',ftype='All',term='',Q={},FX=95.2,SUGG=[],BESTC=[];
+let ALL=[],INSTR={},sel='RELIANCE',market='IN',ftype='All',term='',Q={},REC={},FX=95.2,SUGG=[],BESTC=[];
 let S=JSON.parse(localStorage.getItem('sim3')||'null')||{cash:CAP,bank:0,gross:0,net:0,fee:0,pending:0,sells:0,wins:0,auto:false,bots:{},hold:{},fills:[]};
 const save=()=>localStorage.setItem('sim3',JSON.stringify(S));
 const curOf=s=>(INSTR[s]||{}).currency||'INR';
@@ -210,6 +220,28 @@ function items(){
  if(ftype!=='All')rows=rows.filter(i=>i.type===ftype);
  return rows.filter(i=>i.symbol.toLowerCase().includes(t)||i.name.toLowerCase().includes(t));
 }
+function recBadge(s){const r=REC[s];if(!r)return '';const c=r.action==='BUY'?'buy':r.action==='SELL'?'sell':'wait';
+ return ` <span class="pillx ${c}" style="font-size:9px;padding:2px 6px">${r.action}</span>`}
+function renderRec(){
+ const r=REC[sel];
+ $('recsym').textContent=sel;
+ if(!r){$('recact').textContent='...';$('recact').className='pillx wait';$('recmeta').textContent='loading call';$('recreasons').textContent='';return}
+ const c=r.action==='BUY'?'buy':r.action==='SELL'?'sell':'wait';
+ $('recact').textContent=r.action+' \u00b7 '+r.confidence+'% confident';
+ $('recact').className='pillx '+c;
+ $('recmeta').textContent=`price ${inr(px(sel)||r.price)} \u00b7 target ${inr(r.target)} \u00b7 stop ${inr(r.stop)} \u00b7 reward ${r.reward_pct}% / risk ${r.risk_pct}% \u00b7 R:R ${r.rr}`;
+ $('recreasons').innerHTML=r.reasons.slice(0,3).map(x=>'\u2022 '+x).join('<br>');
+ $('sidehint').innerHTML=r.action==='BUY'?'Suggestion: <b class="up">BUY / LONG</b> \u00b7 target '+inr(r.target):(r.action==='SELL'?'Suggestion: <b class="dn">SELL / SHORT</b> \u00b7 target '+inr(r.target):'Suggestion: <b>WAIT</b> — no clear edge right now');
+}
+$('tradecall').onclick=()=>{const r=REC[sel];if(!r)return alert('Call not loaded yet.');
+ if(S.bots[sel])return alert('Algo already running on '+sel+'.');
+ startAlgo(sel,r.best_strategy)};
+async function loadRecs(){
+ const need=[...new Set([sel,...items().slice(0,30).map(i=>i.symbol),...Object.keys(S.hold),...Object.values(S.bots).map(b=>b.sym)])].filter(Boolean).slice(0,25);
+ if(!need.length)return;
+ try{(await (await fetch('/api/recommendations?symbols='+need.join(','))).json()).forEach(r=>REC[r.symbol]=r)}catch(e){}
+ renderRec();renderList();renderPos();
+}
 function pxCell(s){const q=Q[s];if(!q)return '<span class="nm">...</span>';const c=q.change_pct>=0?'up':'dn';
  return `<div class="px">${inr(px(s))}</div><div class="chg ${c}">${q.change_pct>=0?'+':''}${q.change_pct}%</div>`}
 function renderList(){
@@ -220,7 +252,7 @@ function renderList(){
  }
  const f=items();
  $('count').textContent=f.length+' of '+ALL.filter(i=>i.market===market).length+' instruments';
- $('list').innerHTML=f.slice(0,150).map(i=>`<div class="row ${i.symbol===sel?'sel':''}" data-s="${i.symbol}"><div><div class="sym">${i.symbol}${S.bots[i.symbol]?'<span class="on-pill"> BOT</span>':''}${S.hold[i.symbol]?'<span class="on-pill" style="color:var(--acc)"> HELD</span>':''}</div><div class="nm">${i.name} &middot; ${i.exchange}</div></div><div>${pxCell(i.symbol)}</div></div>`).join('');
+ $('list').innerHTML=f.slice(0,150).map(i=>`<div class="row ${i.symbol===sel?'sel':''}" data-s="${i.symbol}"><div><div class="sym">${i.symbol}${recBadge(i.symbol)}${S.bots[i.symbol]?'<span class="on-pill"> BOT</span>':''}${S.hold[i.symbol]?'<span class="on-pill" style="color:var(--acc)"> HELD</span>':''}</div><div class="nm">${i.name} &middot; ${i.exchange}</div></div><div>${pxCell(i.symbol)}</div></div>`).join('');
 }
 $('list').onclick=e=>{const r=e.target.closest('.row');if(r){sel=r.dataset.s;renderList();showAll();run();loadQuotes()}};
 $('q').oninput=e=>{term=e.target.value;renderList();clearTimeout(window.qt);window.qt=setTimeout(loadQuotes,350)};
@@ -243,12 +275,15 @@ async function loadQuotes(){
  const need=[...new Set([sel,Object.keys(S.hold),...Object.values(S.bots).filter(b=>b.pos).map(b=>b.sym),...items().slice(0,30).map(i=>i.symbol),...BESTC.slice(0,10).map(s=>s.symbol)])].filter(Boolean).slice(0,30);
  if(!need.length)return;
  try{(await (await fetch('/api/quotes?symbols='+need.join(','))).json()).forEach(q=>Q[q.symbol]=q)}catch(e){}
- $('upd').textContent=now();renderList();showHead();renderMoney();showAll();
+ $('upd').textContent=now();renderList();showHead();renderMoney();showAll();loadRecs();
 }
 async function loadFX(){try{FX=(await (await fetch('/api/fx')).json()).USDINR||FX}catch(e){}}
 /* ---------------- positions / suggestions ---------------- */
 function posRow(r,key){const p=px(r.sym);const pl=p?((r.side==='LONG'?p-r.entry:r.entry-p)*r.qty*unitOf(r.sym)):0;
- return `<div><b>${r.sym}</b> <span class="mk">${r.side}</span> ${r.qty.toFixed(2)} @ ${inr(r.entry)} \u00b7 LTP ${p?inr(p):'-'} \u00b7 <b class="${pl>=0?'up':'dn'}">${inr(pl)}</b> <button data-x="${key}" style="padding:2px 8px;font-size:11px">Close</button></div>`}
+ const rc=REC[r.sym];let adv='';
+ if(rc){const against=r.side==='LONG'?rc.action==='SELL':rc.action==='BUY';
+  adv=` <span class="pillx ${against?'sell':'buy'}" style="font-size:9px;padding:2px 7px">${against?(r.side==='LONG'?'SELL NOW':'COVER NOW'):'HOLD'}</span>`}
+ return `<div><b>${r.sym}</b> <span class="mk">${r.side}</span>${adv} ${r.qty.toFixed(2)} @ ${inr(r.entry)} \u00b7 LTP ${p?inr(p):'-'} \u00b7 <b class="${pl>=0?'up':'dn'}">${inr(pl)}</b> <button data-x="${key}" style="padding:2px 8px;font-size:11px">Close</button></div>`}
 function renderPos(){
  const rows=[];
  for(const s in S.hold)rows.push(posRow(S.hold[s],'h:'+s));
@@ -257,12 +292,13 @@ function renderPos(){
 }
 $('pos').onclick=e=>{const b=e.target.closest('button[data-x]');if(!b)return;const [k,s]=b.dataset.x.split(':');
  closeTrade(k==='h'?S.hold[s]:S.bots[s],'MANUAL CLOSE');save();renderAll()};
+function confBadge(sym){const r=REC[sym];return r?` <span class="legend">${r.confidence}% confidence</span>`:''}
 function renderSugg(){
  $('bmkt').textContent=market==='BEST'?'India + US + crypto':(market==='IN'?'India':market==='US'?'US':'Crypto');
  const rows=(market==='BEST'?BESTC:SUGG);
  $('sugg').innerHTML=rows.slice(0,7).map(s=>{
   const tgt=s.price*(1+6/100), stp=s.price*(1-2.5/100), mk=s.market==='IN'?'NSE':s.market;
-  return `<div><b>${s.symbol}</b> <span class="mk">${mk}</span> <span class="${s.action==='BUY'?'up':'dn'}"><b>${s.action}</b></span> \u00b7 ${s.strategy} \u00b7 3m ${s.ret_3m>0?'+':''}${s.ret_3m}%<br>
+  return `<div><b>${s.symbol}</b> <span class="mk">${mk}</span> <span class="pillx ${s.action==='BUY'?'buy':'wait'}" style="font-size:9px;padding:2px 7px">${s.action}</span>${confBadge(s.symbol)} \u00b7 ${s.strategy} \u00b7 3m ${s.ret_3m>0?'+':''}${s.ret_3m}%<br>
   <span class="legend">${inr(s.price)} \u00b7 target ${inr(tgt)} \u00b7 stop ${inr(stp)}</span> <button data-start="${s.symbol}" data-strat="${s.strategy}" style="padding:2px 9px;font-size:11px">Start algo</button></div>`}).join('')||'<div class="legend">Scanning the market…</div>';
  $('sugg').innerHTML+=`<div style="padding-top:8px"><button class="go" id="top5">Start algo on top 5 trades</button></div>`;
 }
@@ -393,6 +429,6 @@ async function boot(){
  Object.values(S.bots).forEach(b=>tickBot(b));
 }
 boot();
-setInterval(tick,4000);setInterval(loadQuotes,15000);setInterval(loadScan,90000);setInterval(loadFX,600000);
+setInterval(tick,4000);setInterval(loadQuotes,15000);setInterval(loadRecs,30000);setInterval(loadScan,90000);setInterval(loadFX,600000);
 </script></body></html>
 '''

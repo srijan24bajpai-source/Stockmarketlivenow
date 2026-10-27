@@ -25,6 +25,9 @@ global.fetch = async url => {
   if (url.startsWith('/api/quotes')) return { json: async () => [{ symbol: 'AAPL', price: P, change_pct: 1, currency: 'USD', simulated: false }] };
   if (url.startsWith('/api/signal')) return { json: async () => ({ signal: SIG, price: P, simulated: false }) };
   if (url.startsWith('/api/best')) return { json: async () => ({ best: 'momentum' }) };
+  if (url.startsWith('/api/recommendations') || url.startsWith('/api/recommend'))
+    return { json: async () => [{ symbol: 'AAPL', action: 'BUY', confidence: 72, price: P, target: P * 1.06, stop: P * 0.975,
+      reward_pct: 6, risk_pct: 2.5, rr: 2.4, reasons: ['4 of 6 strategies bullish'], best_strategy: 'momentum' }] };
   if (url.startsWith('/api/scan')) return { json: async () => [] };
   if (url.startsWith('/api/backtest')) return { json: async () => ({ return_pct: 5, max_drawdown_pct: 2, sharpe: 1, num_trades: 3, last: P, index: [100, 101], equity: [100, 101], trades: [] }) };
   throw new Error('unexpected ' + url);

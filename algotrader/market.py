@@ -98,6 +98,13 @@ def by_id(sid):
     raise KeyError(sid)
 
 
+def name_of(sid):
+    try:
+        return by_id(sid)["name"]
+    except KeyError:
+        return sid
+
+
 def price_of(sid):
     i = by_id(sid)
     if i["type"] == "OPT":

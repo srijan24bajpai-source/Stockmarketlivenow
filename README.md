@@ -44,6 +44,22 @@ Standard library only. The JavaScript tests need `node`.
 State lives in your browser (localStorage), so it survives reloads with no server database.
 `Reset` clears it.
 
+## Buy / sell calls (shown everywhere)
+
+Every stock row, the selected instrument banner, the manual-order card and every open position
+carries a live call from `/api/recommend`, plus a confidence score, target, stop and reward/risk.
+
+- Score = 60% strategy breadth (how many of the six strategies are bullish) + trend vs the 20-day
+  average (15 pts) + 20-day momentum (up to 15 pts) + an RSI overbought/oversold adjustment.
+- `BUY` at score >= 58, `SELL` at <= 42, otherwise `WAIT`. Confidence = distance from neutral,
+  capped at 95%.
+- Target and stop come from the average true range: 2 x ATR reward, 1.2 x ATR risk.
+- Reasons are listed in plain English (breadth, moving averages, RSI, momentum, best strategy).
+- Open positions are flagged `HOLD`, or `SELL NOW` / `COVER NOW` when the call turns against them.
+- `Trade this call` starts a bot using the best recent strategy for that instrument.
+
+Calls are mechanical model output on delayed data, not advice.
+
 ## Limits - read this
 
 - No real money, no broker, no order routing. Fills use the last quoted price: no slippage,

@@ -3,7 +3,7 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import market, scanner
+from . import market, recommend, scanner
 from .backtest import backtest
 from .strategies import STRATEGIES
 from .ui import PAGE
@@ -43,6 +43,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(market.quotes(ids)))
         if path == "/api/scan":
             return self._send(200, json.dumps(scanner.scan(arg("market", "IN"), int(arg("limit", "8")))))
+        if path == "/api/recommend":
+            return self._send(200, json.dumps(recommend.recommend(arg("symbol").upper())))
+        if path == "/api/recommendations":
+            ids = [x.strip() for x in arg("symbols").split(",") if x.strip()]
+            return self._send(200, json.dumps(recommend.batch(ids)))
         if path == "/api/fx":
             return self._send(200, json.dumps({"USDINR": market.usdinr()}))
         if path == "/api/optionchain":
