@@ -1,5 +1,6 @@
 """Buy / sell / wait calls with confidence, target, stop and plain reasons."""
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from . import market
 from .backtest import backtest
@@ -85,11 +86,16 @@ def recommend(sid):
     return out
 
 
-def batch(symbols, limit=25):
-    out = []
-    for s in [x for x in symbols if x][:limit]:
-        try:
-            out.append(recommend(s))
-        except Exception:
-            continue
-    return out
+def _safe(sid):
+    try:
+        return recommend(sid)
+    except Exception:
+        return None
+
+
+def batch(symbols, limit=20):
+    ids = list(dict.fromkeys(x for x in symbols if x))[:limit]
+    if not ids:
+        return []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return [r for r in ex.map(_safe, ids) if r]

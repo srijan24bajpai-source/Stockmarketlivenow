@@ -45,9 +45,9 @@ class RecommendTest(unittest.TestCase):
             b = rec.recommend("TCS")
         self.assertIs(a, b)
 
-    def test_batch_skips_bad_symbols(self):
-        with mock.patch.object(rec, "recommend", side_effect=[{"symbol": "X"}, KeyError("bad")]):
-            out = rec.batch(["X", "BAD"])
+    def test_batch_skips_bad_symbols_and_dedupes(self):
+        with mock.patch.object(rec, "recommend", side_effect=lambda s: {"symbol": s} if s == "X" else (_ for _ in ()).throw(KeyError("bad"))):
+            out = rec.batch(["X", "BAD", "X"])
         self.assertEqual(out, [{"symbol": "X"}])
 
 
