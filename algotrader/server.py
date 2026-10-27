@@ -7,25 +7,8 @@ from .backtest import backtest
 from .data import generate_prices
 from .strategies import STRATEGIES
 
-PAGE = """<!doctype html><meta charset=utf-8><title>AlgoTrader</title>
-<style>body{font-family:sans-serif;max-width:900px;margin:2em auto}canvas{width:100%;border:1px solid #ccc}</style>
-<h1>AlgoTrader (simulated data)</h1>
-Symbol <input id=sym value=AAPL size=6>
-<select id=strat><option value=sma_crossover>SMA crossover</option><option value=rsi>RSI</option></select>
-<button onclick=run()>Backtest</button>
-<pre id=out></pre><canvas id=c width=900 height=350></canvas>
-<script>
-async function run(){
- const r=await (await fetch('/api/backtest?symbol='+sym.value+'&strategy='+strat.value)).json();
- const {equity,trades,...m}=r; out.textContent=JSON.stringify(m,null,2);
- const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
- const lo=Math.min(...r.prices),hi=Math.max(...r.prices);
- const line=(a,col)=>{g.beginPath();g.strokeStyle=col;a.forEach((v,i)=>{const x=i/(a.length-1)*c.width,y=c.height-(v-lo)/(hi-lo)*c.height;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()};
- line(r.prices,'#888');
- trades.forEach(t=>{const x=t.bar/(r.prices.length-1)*c.width,y=c.height-(t.price-lo)/(hi-lo)*c.height;g.fillStyle=t.side=='BUY'?'green':'red';g.fillRect(x-3,y-3,6,6)});
-}
-run();
-</script>"""
+from .ui import PAGE
+from .stocks import STOCKS
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -41,6 +24,8 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/":
             return self._send(200, PAGE, "text/html")
+        if u.path == "/api/stocks":
+            return self._send(200, json.dumps(STOCKS))
         if u.path == "/api/backtest":
             q = parse_qs(u.query)
             symbol = q.get("symbol", ["AAPL"])[0].upper()[:10]
@@ -49,7 +34,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, json.dumps({"error": "unknown strategy"}))
             prices = generate_prices(symbol)
             res = backtest(prices, STRATEGIES[name](prices))
-            res["prices"] = prices
+            base = prices[0]
+            res["index"] = [round(p / base * 100, 2) for p in prices]
+            res["trades"] = [{"bar": t["bar"], "side": t["side"]} for t in res["trades"]]
+            res["equity"] = [round(e / res["equity"][0] * 100, 2) for e in res["equity"]]
             return self._send(200, json.dumps(res))
         self._send(404, json.dumps({"error": "not found"}))
 
