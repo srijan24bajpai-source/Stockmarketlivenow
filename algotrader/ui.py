@@ -24,6 +24,8 @@ button:active,button.on{box-shadow:inset 4px 4px 8px var(--lo),inset -4px -4px 8
 .row{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;margin-bottom:10px;border-radius:14px;cursor:pointer;box-shadow:4px 4px 8px var(--lo),-4px -4px 8px var(--hi)}
 .row.sel{box-shadow:inset 4px 4px 8px var(--lo),inset -4px -4px 8px var(--hi)}
 .sym{font-weight:800}.nm{font-size:12.5px;color:var(--mut)}.px{font-size:12px;color:var(--mut);font-style:italic}
+.big{font-size:26px;font-weight:800;margin-top:6px}.big small{font-size:14px;margin-left:8px}
+.cfg{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 12px}.cfg label{font-size:12.5px;font-weight:600;color:var(--mut)}.cfg input{width:90px;display:block;margin-top:4px}
 .bot{font-size:11px;font-weight:700;color:var(--up);margin-left:6px}
 .panel{padding:26px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px}
@@ -42,7 +44,7 @@ canvas{width:100%;height:320px;border-radius:18px}
 #log{max-height:170px;overflow:auto;font-size:13.5px}
 #log div{padding:4px 0;border-bottom:1px solid var(--lo)}
 </style></head><body>
-<header class="raised"><h1>&#9670; AlgoTrader</h1><span class="pill inset">Prices: coming soon (premium feed)</span></header>
+<header class="raised"><h1>&#9670; AlgoTrader</h1><span class="pill inset" id="wal"></span><button id="rst">Reset wallet</button></header>
 <main>
  <aside class="raised side">
   <input id="q" placeholder="Search stocks, e.g. TSLA, Infosys">
@@ -52,7 +54,7 @@ canvas{width:100%;height:320px;border-radius:18px}
  </aside>
  <section class="raised panel">
   <div class="top">
-   <div><h2 id="hs">-</h2><div class="nm" id="hn"></div><div class="px">Live price: unlock with premium plan</div></div>
+   <div><h2 id="hs">-</h2><div class="nm" id="hn"></div><div id="hp" class="big"></div></div>
    <div class="ctl">
     <select id="strat"><option value="sma_crossover">SMA crossover</option><option value="rsi">RSI mean reversion</option></select>
     <button id="go">Run backtest</button>
@@ -61,30 +63,50 @@ canvas{width:100%;height:320px;border-radius:18px}
   </div>
   <div class="stats" id="stats"></div>
   <canvas id="c" class="inset" width="1000" height="320"></canvas>
-  <div class="legend">Dark: stock performance (indexed to 100) &middot; Blue: strategy equity &middot; Green/Red dots: buy/sell</div>
-  <div class="bt inset"><h3>Algo trading bot <span id="bs" class="px">off</span></h3><div id="log"></div></div>
-  <div class="legend">Paper trading on simulated data. Not financial advice.</div>
+  <div class="legend">Dark: stock price (indexed to 100, 1 year daily) &middot; Blue: strategy equity &middot; Green/Red dots: buy/sell</div>
+  <div class="bt inset"><h3>Algo trading bot <span id="bs" class="px">off</span></h3><div class="cfg"><label>Trailing stop %<input id="ts" type="number" value="5" min="0.5" step="0.5"></label><label>Take profit %<input id="tp" type="number" value="10" min="0.5" step="0.5"></label><label>Size % of cash<input id="sz" type="number" value="10" min="1" max="100"></label></div><div id="log"></div></div>
+  <div class="legend">Paper wallet with real delayed market prices (Yahoo Finance). No real money is used. Not financial advice.</div>
  </section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 let ALL=[],sel='AAPL',sector='All',term='';
 let bots=JSON.parse(localStorage.getItem('bots')||'{}');
-const save=()=>localStorage.setItem('bots',JSON.stringify(bots));
-function renderList(){
+let W=JSON.parse(localStorage.getItem('wallet')||'null')||{USD:100000,INR:1000000,realized:{USD:0,INR:0}};
+let Q={},CUR={};
+const save=()=>{localStorage.setItem('bots',JSON.stringify(bots));localStorage.setItem('wallet',JSON.stringify(W))};
+const sym$=c=>c==='INR'?'\u20b9':'$';
+const fmt=(v,c)=>sym$(c)+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const curOf=s=>(ALL.find(x=>x.symbol===s)||{}).exchange==='NSE'?'INR':'USD';
+function pxCell(s){const q=Q[s];if(!q)return '...';const c=q.change_pct>=0?'up':'dn';return `<b style="color:var(--txt);font-style:normal">${fmt(q.price,q.currency)}</b><br><span class="${c}">${q.change_pct>=0?'+':''}${q.change_pct}%</span>`}
+function walletTxt(){
+ let held={USD:0,INR:0};
+ for(const [s,b] of Object.entries(bots))if(b.pos&&Q[s])held[curOf(s)]+=b.qty*Q[s].price;
+ $('wal').textContent='Wallet '+fmt(W.USD+held.USD,'USD')+' | '+fmt(W.INR+held.INR,'INR')+' | Booked P&L '+fmt(W.realized.USD,'USD')+' / '+fmt(W.realized.INR,'INR');
+}
+$('rst').onclick=()=>{if(confirm('Reset paper wallet and all bots?')){bots={};W={USD:100000,INR:1000000,realized:{USD:0,INR:0}};save();renderList();showBot();walletTxt()}};
+async function loadQuotes(){
+ const t=term.toLowerCase();
+ const vis=ALL.filter(s=>(sector==='All'||s.sector===sector||s.exchange===sector)&&(s.symbol.toLowerCase().includes(t)||s.name.toLowerCase().includes(t))).slice(0,30).map(s=>s.symbol);
+ const need=[...new Set([sel,...Object.keys(bots),...vis])].slice(0,30);
+ try{(await (await fetch('/api/quotes?symbols='+need.join(','))).json()).forEach(q=>Q[q.symbol]=q)}catch(e){}
+ renderList(true);showHead();walletTxt();
+}
+function showHead(){const q=Q[sel];$('hp').innerHTML=q?fmt(q.price,q.currency)+`<small class="${q.change_pct>=0?'up':'dn'}">${q.change_pct>=0?'+':''}${q.change_pct}% today</small>`+(q.simulated?'<small>(simulated: live feed unavailable)</small>':''):''}
+function renderList(keep){
  const t=term.toLowerCase();
  const f=ALL.filter(s=>(sector==='All'||s.sector===sector||s.exchange===sector)&&(s.symbol.toLowerCase().includes(t)||s.name.toLowerCase().includes(t)));
  $('count').textContent=f.length+' of '+ALL.length+' stocks';
- $('list').innerHTML=f.map(s=>`<div class="row ${s.symbol===sel?'sel':''}" data-s="${s.symbol}"><div><div class="sym">${s.symbol}${bots[s.symbol]?'<span class="bot">BOT ON</span>':''}</div><div class="nm">${s.name} · ${s.exchange}</div></div><div class="px">soon</div></div>`).join('');
+ $('list').innerHTML=f.map(s=>`<div class="row ${s.symbol===sel?'sel':''}" data-s="${s.symbol}"><div><div class="sym">${s.symbol}${bots[s.symbol]?'<span class="bot">BOT ON</span>':''}</div><div class="nm">${s.name} · ${s.exchange}</div></div><div class="px" style="text-align:right">${pxCell(s.symbol)}</div></div>`).join('');
 }
-$('list').onclick=e=>{const r=e.target.closest('.row');if(r){sel=r.dataset.s;renderList();run();showBot()}};
-$('q').oninput=e=>{term=e.target.value;renderList()};
-$('go').onclick=run;$('strat').onchange=()=>{run();if(bots[sel]){bots[sel]={strategy:$('strat').value,bar:60,pos:0,entry:0,pnl:0,log:[]};save();showBot()}};
+$('list').onclick=e=>{const r=e.target.closest('.row');if(r){sel=r.dataset.s;renderList();run();showBot();loadQuotes()}};
+$('q').oninput=e=>{term=e.target.value;renderList();clearTimeout(window.qt);window.qt=setTimeout(loadQuotes,350)};
+$('go').onclick=run;$('strat').onchange=()=>{run();if(bots[sel]){closePos(sel,'STRATEGY CHANGED');bots[sel]=newBot();save();showBot()}};
 function chips(){
  const secs=['All','US','NSE',...new Set(ALL.map(s=>s.sector))];
  $('chips').innerHTML=secs.map(s=>`<button class="chip ${s===sector?'on':''}" data-c="${s}">${s}</button>`).join('');
 }
-$('chips').onclick=e=>{const b=e.target.closest('.chip');if(b){sector=b.dataset.c;chips();renderList()}};
+$('chips').onclick=e=>{const b=e.target.closest('.chip');if(b){sector=b.dataset.c;chips();renderList();loadQuotes()}};
 function draw(r){
  const c=$('c'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
  const all=r.index.concat(r.equity),lo=Math.min(...all),hi=Math.max(...all),n=r.index.length;
@@ -103,28 +125,49 @@ async function run(){
   .map(x=>`<div class="stat raised"><small>${x[0]}</small><b class="${x[2]}">${x[1]}</b></div>`).join('');
  draw(r);
 }
+const newBot=()=>({strategy:$('strat').value,ts:+$('ts').value||5,tp:+$('tp').value||10,sz:+$('sz').value||10,pos:0,qty:0,entry:0,peak:0,armed:false,pnl:0,log:[]});
 function showBot(){
  const b=bots[sel];
  $('tg').classList.toggle('on',!!b);
- if(b)$('strat').value=b.strategy;
- $('bs').textContent=b?(b.pos?'in position':'flat')+' · paper P&L '+b.pnl.toFixed(2)+'%':'off';
- $('log').innerHTML=b?(b.log.slice().reverse().map(l=>`<div class="${l.side==='BUY'?'up':'dn'}"><b>${l.side}</b> bar ${l.bar} · index ${l.index}${l.pl!=null?' · trade '+l.pl.toFixed(2)+'%':''}</div>`).join('')||'<div>Waiting for a signal…</div>'):'<div>Switch on Algo trading to start the paper bot for '+sel+'.</div>';
+ if(b){$('strat').value=b.strategy;$('ts').value=b.ts;$('tp').value=b.tp;$('sz').value=b.sz}
+ const q=Q[sel];
+ $('bs').textContent=b?(b.pos?'in position: '+b.qty.toFixed(4)+' sh @ '+fmt(b.entry,curOf(sel))+', stop '+fmt(b.peak*(1-b.ts/100),curOf(sel)):(b.armed?'flat, waiting for buy signal':'flat, waiting for sell signal to re-arm'))+' | booked '+fmt(b.pnl,curOf(sel)):'off';
+ $('log').innerHTML=b?(b.log.slice().reverse().map(l=>`<div class="${l.side==='BUY'?'up':(l.pl>=0?'up':'dn')}"><b>${l.side}</b> ${l.why||''} \u00b7 ${l.qty.toFixed(4)} @ ${fmt(l.price,curOf(sel))}${l.pl!=null?' \u00b7 P&L '+fmt(l.pl,curOf(sel)):''} \u00b7 ${l.t}</div>`).join('')||'<div>Waiting for a signal...</div>'):'<div>Switch on Algo trading to start the paper bot for '+sel+'.</div>';
+}
+function closePos(s,why,price){
+ const b=bots[s];if(!b||!b.pos)return;
+ const c=curOf(s),p=price||(Q[s]&&Q[s].price)||b.entry;
+ const pl=(p-b.entry)*b.qty;W[c]+=b.qty*p;W.realized[c]+=pl;b.pnl+=pl;
+ b.log.push({side:'SELL',why,qty:b.qty,price:p,pl,t:new Date().toLocaleTimeString()});
+ b.pos=0;b.qty=0;b.armed=false;
 }
 $('tg').onclick=()=>{
- if(bots[sel])delete bots[sel];else bots[sel]={strategy:$('strat').value,bar:60,pos:0,entry:0,pnl:0,log:[]};
- save();renderList();showBot();
+ if(bots[sel]){closePos(sel,'BOT OFF');delete bots[sel]}else bots[sel]=newBot();
+ save();renderList();showBot();walletTxt();tick();
 };
+['ts','tp','sz'].forEach(id=>$(id).onchange=()=>{const b=bots[sel];if(b){b.ts=+$('ts').value||5;b.tp=+$('tp').value||10;b.sz=+$('sz').value||10;save();showBot()}});
 async function tick(){
- for(const [sym,b] of Object.entries(bots)){
+ for(const [s,b] of Object.entries(bots)){
   try{
-   const r=await (await fetch('/api/signal?symbol='+sym+'&strategy='+b.strategy+'&bar='+b.bar)).json();
-   if(r.signal===1&&!b.pos){b.pos=1;b.entry=r.index;b.log.push({side:'BUY',bar:r.bar,index:r.index})}
-   else if(r.signal===0&&b.pos){const pl=(r.index/b.entry-1)*100;b.pos=0;b.pnl+=pl;b.log.push({side:'SELL',bar:r.bar,index:r.index,pl})}
-   b.bar=r.bar>=500?60:r.bar+1;
+   const r=await (await fetch('/api/signal?symbol='+encodeURIComponent(s)+'&strategy='+b.strategy)).json();
+   if(r.error)continue;
+   const c=curOf(s),p=r.price;Q[s]=Object.assign(Q[s]||{symbol:s,change_pct:0,currency:c},{price:p,simulated:r.simulated});
+   if(b.pos){
+    b.peak=Math.max(b.peak,p);
+    if(p<=b.peak*(1-b.ts/100))closePos(s,'TRAILING STOP',p);
+    else if(p>=b.entry*(1+b.tp/100))closePos(s,'TAKE PROFIT',p);
+    else if(r.signal===0)closePos(s,'SIGNAL EXIT',p);
+   }else{
+    if(r.signal===0)b.armed=true;
+    else if(b.armed){
+     const spend=Math.min(W[c],W[c]*b.sz/100);
+     if(spend>0&&p>0){b.qty=spend/p;W[c]-=spend;b.pos=1;b.entry=p;b.peak=p;b.log.push({side:'BUY',why:'SIGNAL',qty:b.qty,price:p,t:new Date().toLocaleTimeString()})}
+    }
+   }
   }catch(e){}
  }
- save();showBot();
+ save();showBot();walletTxt();renderList(true);
 }
-setInterval(tick,2500);
-fetch('/api/stocks').then(r=>r.json()).then(d=>{ALL=d;chips();renderList();run();showBot()});
+setInterval(tick,15000);setInterval(loadQuotes,30000);
+fetch('/api/stocks').then(r=>r.json()).then(d=>{ALL=d;chips();renderList();run();showBot();loadQuotes();tick()});
 </script></body></html>"""
