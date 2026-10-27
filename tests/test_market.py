@@ -20,13 +20,22 @@ class Resp:
         return json.dumps(FAKE).encode()
 
 
-class T(unittest.TestCase):
+class MarketTest(unittest.TestCase):
     def setUp(self):
         market._cache.clear()
 
-    def test_symbol_mapping(self):
-        self.assertEqual(market.yahoo_symbol("TCS"), "TCS.NS")
-        self.assertEqual(market.yahoo_symbol("BRK.B"), "BRK-B")
+    def test_yahoo_symbols_cover_nse_bse_and_us(self):
+        self.assertEqual(market.by_id("TCS")["yahoo"], "TCS.NS")
+        self.assertEqual(market.by_id("500325")["yahoo"], "500325.BO")
+        self.assertEqual(market.by_id("AAPL")["yahoo"], "AAPL")
+        self.assertEqual(market.by_id("^NSEI")["yahoo"], "^NSEI")
+        self.assertEqual(market.by_id("BTC-USD")["market"], "CRYPTO")
+
+    def test_futures_have_lot_and_margin(self):
+        f = market.by_id("NIFTY-FUT")
+        self.assertEqual(f["type"], "FUT")
+        self.assertEqual(f["unit"], 75)
+        self.assertLess(f["margin"], 1)
 
     def test_history_parses_and_drops_empty_closes(self):
         with mock.patch("urllib.request.urlopen", return_value=Resp()):
@@ -41,16 +50,19 @@ class T(unittest.TestCase):
         self.assertTrue(h["simulated"])
         self.assertEqual(len(h["closes"]), 250)
 
-    def test_unknown_and_bad_input(self):
-        with self.assertRaises(KeyError):
-            market.history("NOPE")
-        self.assertEqual(market.quotes([]), [])
-
-    def test_quote_change(self):
+    def test_quote_and_change(self):
         with mock.patch("urllib.request.urlopen", return_value=Resp()):
             q = market.quote("AAPL")
         self.assertEqual(q["price"], 110.0)
         self.assertEqual(q["change_pct"], 10.0)
+
+    def test_unknown_symbol_raises(self):
+        with self.assertRaises(KeyError):
+            market.by_id("NOT-A-SYMBOL")
+
+    def test_fx_falls_back(self):
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
+            self.assertEqual(market.usdinr(), 83.5)
 
 
 if __name__ == "__main__":

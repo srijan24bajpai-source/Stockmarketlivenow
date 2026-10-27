@@ -1,14 +1,12 @@
 """Dashboard + JSON API. Run: python -m algotrader.server"""
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
+from . import market, scanner
 from .backtest import backtest
-from . import market
 from .strategies import STRATEGIES
-
 from .ui import PAGE
-from .stocks import STOCKS
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -20,50 +18,61 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def log_message(self, *a):
+        pass
+
     def do_GET(self):
         u = urlparse(self.path)
-        if u.path == "/":
-            return self._send(200, PAGE, "text/html")
-        if u.path == "/api/stocks":
-            return self._send(200, json.dumps(STOCKS))
         q = parse_qs(u.query)
-        if u.path == "/api/fx":
+        try:
+            return self.route(u.path, q)
+        except KeyError as e:
+            return self._send(404, json.dumps({"error": "unknown symbol %s" % e}))
+        except Exception as e:  # never 500 the dashboard
+            return self._send(400, json.dumps({"error": str(e)}))
+
+    def route(self, path, q):
+        arg = lambda k, d="": q.get(k, [d])[0]
+        if path in ("/", "/index.html"):
+            return self._send(200, PAGE, "text/html")
+        if path == "/api/instruments":
+            rows = market.instruments(arg("market") or None)
+            return self._send(200, json.dumps(rows))
+        if path == "/api/quotes":
+            ids = [s.strip() for s in arg("symbols").split(",") if s.strip()]
+            return self._send(200, json.dumps(market.quotes(ids)))
+        if path == "/api/scan":
+            return self._send(200, json.dumps(scanner.scan(arg("market", "IN"), int(arg("limit", "8")))))
+        if path == "/api/fx":
             return self._send(200, json.dumps({"USDINR": market.usdinr()}))
-        if u.path == "/api/best":
-            symbol = q.get("symbol", ["AAPL"])[0].upper()
-            if symbol not in market.BY_SYMBOL:
-                return self._send(400, json.dumps({"error": "unknown symbol"}))
-            key = ("best", symbol)
-            hit = market._cache.get(key)
-            if not (hit and __import__("time").time() - hit[0] < 300):
-                prices = market.history(symbol)["closes"]
-                best = max(STRATEGIES, key=lambda n: backtest(prices, STRATEGIES[n](prices))["return_pct"])
-                hit = market._cache[key] = (__import__("time").time(), best)
-            return self._send(200, json.dumps({"best": hit[1]}))
-        if u.path == "/api/quotes":
-            syms = [x.strip().upper() for x in q.get("symbols", [""])[0].split(",") if x.strip()]
-            return self._send(200, json.dumps(market.quotes(syms)))
-        if u.path in ("/api/signal", "/api/backtest"):
-            symbol = q.get("symbol", ["AAPL"])[0].upper()
-            name = q.get("strategy", ["sma_crossover"])[0]
-            if symbol not in market.BY_SYMBOL:
-                return self._send(400, json.dumps({"error": "unknown symbol"}))
+        if path == "/api/optionchain":
+            name = arg("underlying", "NIFTY")
+            rows = [o for o in market.instruments("IN")
+                    if o["type"] == "OPT" and o.get("underlying") == name]
+            return self._send(200, json.dumps(rows))
+        if path == "/api/best":
+            sid = arg("symbol").upper()
+            prices = market.history(sid)["closes"][-180:]
+            best = max(STRATEGIES, key=lambda n: backtest(prices, STRATEGIES[n](prices))["return_pct"])
+            return self._send(200, json.dumps({"best": best}))
+        if path in ("/api/signal", "/api/backtest"):
+            sid = arg("symbol").upper()
+            name = arg("strategy", "sma_crossover")
             if name not in STRATEGIES:
                 return self._send(400, json.dumps({"error": "unknown strategy"}))
-            h = market.history(symbol)
+            h = market.history(sid)
             prices = h["closes"]
             sig = STRATEGIES[name](prices)
-            if u.path == "/api/signal":
+            if path == "/api/signal":
                 return self._send(200, json.dumps({"signal": sig[-1], "price": h["price"],
-                                                   "simulated": h["simulated"]}))
+                                                   "simulated": h["simulated"], "type": h["type"]}))
             res = backtest(prices, sig)
             base = prices[0]
             res["index"] = [round(p / base * 100, 2) for p in prices]
-            res["trades"] = [{"bar": t["bar"], "side": t["side"], "price": t["price"]} for t in res["trades"]]
             res["equity"] = [round(e / res["equity"][0] * 100, 2) for e in res["equity"]]
-            res.update(currency=h["currency"], simulated=h["simulated"], last=h["price"])
+            res.update(currency=h["currency"], simulated=h["simulated"], last=h["price"], type=h["type"])
             return self._send(200, json.dumps(res))
-        self._send(404, json.dumps({"error": "not found"}))
+        return self._send(404, json.dumps({"error": "not found"}))
 
 
 if __name__ == "__main__":
