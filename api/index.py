@@ -1,1 +1,5 @@
-from algotrader.server import Handler  # noqa: F401  (Vercel serves `Handler`)
+from algotrader.server import Handler
+
+
+class handler(Handler):
+    pass
