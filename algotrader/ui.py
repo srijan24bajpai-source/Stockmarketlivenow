@@ -56,6 +56,9 @@ canvas{width:100%;height:270px;border-radius:16px}
 #log div{padding:4px 0;border-bottom:1px solid var(--lo)}
 #pos div,#sugg div{padding:6px 0;border-bottom:1px solid var(--lo);font-size:12.5px}
 #fills div{padding:4px 0;font-size:12px;border-bottom:1px solid var(--lo)}
+.jrow{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--lo);font-size:12.5px}
+.jrow b{font-weight:800}.jhead{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;font-weight:800}
+.jtable{max-height:240px;overflow:auto}
 .up{color:var(--up)}.dn{color:var(--dn)}
 .sw{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
 .tg{width:54px;height:28px;border-radius:99px;position:relative;padding:0}
@@ -119,6 +122,14 @@ canvas{width:100%;height:270px;border-radius:16px}
     <button class="dgr" id="closeall">Close all positions</button>
    </div>
   </div>
+  <div class="card inset" style="margin-bottom:16px">
+   <div class="rowbtns" style="justify-content:space-between">
+    <h3 style="margin:0">Profit / loss book &mdash; <span id="daylabel"></span></h3>
+    <div class="rowbtns"><button class="chip on" id="booktoday">Today</button><button class="chip" id="bookall">All time</button></div>
+   </div>
+   <div class="pgrid" id="daysum"></div>
+   <div class="jtable" id="daytable"></div>
+  </div>
   <canvas id="c" width="1000" height="270"></canvas>
   <div class="legend" id="clegend"></div>
   <div class="grid2">
@@ -158,21 +169,40 @@ const inr=v=>'\u20b9'+Number(v||0).toLocaleString('en-IN',{maximumFractionDigits
 const now=()=>new Date().toLocaleTimeString();
 let ALL=[],INSTR={},sel='RELIANCE',market='IN',ftype='All',term='',Q={},REC={},FX=95.2,SUGG=[],BESTC=[];
 let S=JSON.parse(localStorage.getItem('sim3')||'null')||{cash:CAP,bank:0,gross:0,net:0,fee:0,pending:0,sells:0,wins:0,auto:false,bots:{},hold:{},fills:[]};
+S.day=S.day||{key:'',gross:0,fee:0,net:0,trades:0,wins:0,losses:0,bySym:{}};S.days=S.days||[];S.bySym=S.bySym||{};
+let BOOKALL=false;
 const save=()=>localStorage.setItem('sim3',JSON.stringify(S));
 const curOf=s=>(INSTR[s]||{}).currency||'INR';
 const px=s=>{const q=Q[s];if(!q)return null;return curOf(s)==='INR'?q.price:q.price*FX};
 const unitOf=s=>(INSTR[s]||{}).unit||1;
 const margOf=s=>(INSTR[s]||{}).margin||1;
 function fill(side,sym,qty,price,why,pl){S.fills.unshift({side,sym,qty,price,why,pl,t:now()});S.fills=S.fills.slice(0,40)}
+/* ---------------- day book ---------------- */
+function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function ensureDay(){
+ const k=todayKey();
+ if(!S.day||S.day.key!==k){
+  if(S.day&&S.day.trades)S.days=[S.day,...S.days].slice(0,30);
+  S.day={key:k,gross:0,fee:0,net:0,trades:0,wins:0,losses:0,bySym:{}};save();
+ }
+}
+function bookTrade(sym,gross,fee,net){
+ ensureDay();
+ const bump=(box)=>{box.gross+=gross;box.fee+=fee;box.net+=net;box.trades++;net>=0?box.wins++:box.losses++;
+  return box};
+ const D=S.day.bySym[sym]||(S.day.bySym[sym]={gross:0,fee:0,net:0,trades:0,wins:0,losses:0});bump(D);
+ const A=S.bySym[sym]||(S.bySym[sym]={gross:0,fee:0,net:0,trades:0,wins:0,losses:0});bump(A);
+ S.day.gross+=gross;S.day.fee+=fee;S.day.net+=net;S.day.trades++;net>=0?S.day.wins++:S.day.losses++;
+}
 /* ---------------- trading core ---------------- */
 function openTrade(sym,side,qty,why,bot){
  const p=px(sym); if(!p||qty<=0) return false;
  const per=p*unitOf(sym)*margOf(sym), blocked=qty*per, fee=blocked*FEE;
  if(blocked+fee>S.cash+1e-6) return false;
  S.cash-=blocked+fee; S.fee+=fee;
- if(bot){Object.assign(bot,{pos:1,side,qty,entry:p,blocked,best:p,partialDone:false,cd:0});
+ if(bot){Object.assign(bot,{pos:1,side,qty,entry:p,blocked,best:p,partialDone:false,cd:0,entryFee:fee,locked:false,floor:0});
   bot.log.unshift({side:side==='LONG'?'BUY':'SHORT',why,qty,price:p,t:now()}); bot.log=bot.log.slice(0,20)}
- else S.hold[sym]={sym,side,qty,entry:p,blocked};
+ else S.hold[sym]={sym,side,qty,entry:p,blocked,entryFee:fee};
  fill(side==='LONG'?'BUY':'SHORT',sym,qty,p,why,null);
  return true;
 }
@@ -182,14 +212,18 @@ function closeTrade(r,why,price,frac){
  const q=r.qty*(frac||1);
  const pnl=(r.side==='LONG'?p-r.entry:r.entry-p)*q*unitOf(r.sym);
  const blocked=r.blocked*(q/r.qty), fee=blocked*FEE;
- S.cash+=blocked+pnl-fee; S.fee+=fee; S.gross+=pnl; S.net+=pnl-fee; S.pending+=pnl-fee; S.sells++;
- if(pnl-fee>0)S.wins++;
+ const entryFee=(r.entryFee||0)*(q/Math.max(r.qty,1e-9));
+ r.entryFee=Math.max(0,(r.entryFee||0)-entryFee);
+ const net=pnl-entryFee-fee;   // profit after brokerage on both sides
+ S.cash+=blocked+pnl-fee; S.fee+=fee; S.gross+=pnl; S.net+=net; S.pending+=net; S.sells++;
+ if(net>0)S.wins++;
+ bookTrade(r.sym,pnl,entryFee+fee,net);
  r.qty-=q; r.blocked-=blocked;
- if(r.log){ r.realized=(r.realized||0)+pnl-fee;
-  r.log.unshift({side:r.side==='LONG'?'SELL':'COVER',why,qty:q,price:p,pl:pnl-fee,t:now()}); r.log=r.log.slice(0,20);
+ if(r.log){ r.realized=(r.realized||0)+net;
+  r.log.unshift({side:r.side==='LONG'?'SELL':'COVER',why,qty:q,price:p,pl:net,t:now()}); r.log=r.log.slice(0,20);
   if(r.qty<=1e-9){r.pos=0;r.qty=0;r.blocked=0;r.side='';r.cd=3} }
  else if(r.qty<=1e-9) delete S.hold[r.sym];
- fill(r.side==='LONG'?'SELL':'COVER',r.sym,q, p,why,pnl-fee);
+ fill(r.side==='LONG'?'SELL':'COVER',r.sym,q, p,why,net);
 }
 function invested(){let v=0;for(const s in S.hold)v+=S.hold[s].blocked;for(const s in S.bots)v+=S.bots[s].blocked||0;return v}
 function unrealized(){let v=0;const add=r=>{const p=px(r.sym);if(!p)return;v+=(r.side==='LONG'?p-r.entry:r.entry-p)*r.qty*unitOf(r.sym)};
@@ -328,7 +362,7 @@ $('strat').onchange=()=>{const b=S.bots[sel];if(b){if(b.pos)closeTrade(b,'STRATE
 function showBot(){
  const b=S.bots[sel];$('tg').classList.toggle('on',!!b);
  if(b){$('strat').value=b.strategy;$('ts').value=b.ts;$('tp').value=b.tp;$('pp').value=b.pp;$('sz').value=b.sz;$('mode').value=b.mode}
- $('bs').textContent=b?(b.pos?`in ${b.side} ${b.qty.toFixed(2)} @ ${inr(b.entry)} | trail ${inr(b.best*(1-b.ts/100))} | target ${inr(b.entry*(1+b.tp/100))} | booked ${inr(b.realized||0)}`:(b.cd>0?'cooling down after exit':'flat and ready')):'off';
+ $('bs').textContent=b?(b.pos?`in ${b.side} ${b.qty.toFixed(2)} @ ${inr(b.entry)} | trail ${inr(b.best*(1-b.ts/100))} | target ${inr(b.entry*(1+b.tp/100))} | booked ${inr(b.realized||0)}${b.locked?' | profit locked at '+inr(b.floor):''}`:(b.cd>0?'cooling down after exit':'flat and ready')):'off';
  $('bhint').textContent=b?(b.pos?'':'Watching for the next signal; long+short mode enters on either side.'):'Turn this on (or press Start algo) to trade '+sel+' automatically.';
  $('log').innerHTML=b?(b.log.map(l=>`<div class="${l.pl==null?'':(l.pl>=0?'up':'dn')}"><b>${l.side}</b> ${l.why} \u00b7 ${l.qty.toFixed(2)} @ ${inr(l.price)}${l.pl!=null?' \u00b7 '+inr(l.pl):''} \u00b7 ${l.t}</div>`).join('')||'<div>No fills yet.</div>'):'<div>Algo off.</div>';
 }
@@ -351,9 +385,13 @@ async function tickBot(b){
   }else{
    const long=b.side==='LONG';
    b.best=long?Math.max(b.best,p):Math.min(b.best,p);
+   const LOCKBUF=2.02; // covers 1% each side, so any exit after locking is net positive
+   if(!b.locked&&(long?p>=b.entry*(1+LOCKBUF/100):p<=b.entry*(1-LOCKBUF/100))){
+    b.locked=true;b.floor=long?b.entry*(1+LOCKBUF/100):b.entry*(1-LOCKBUF/100)}
    if(!b.partialDone&&(long?p>=b.entry*(1+b.pp/100):p<=b.entry*(1-b.pp/100))){b.partialDone=true;closeTrade(b,'PARTIAL PROFIT',p,0.5)}
    if(b.pos){
-    if(long?p<=b.best*(1-b.ts/100):p>=b.best*(1+b.ts/100))closeTrade(b,long?'TRAILING STOP':'TRAILING STOP',p);
+    const trail=long?Math.max(b.best*(1-b.ts/100),b.locked?b.floor:-1):Math.min(b.best*(1+b.ts/100),b.locked?b.floor:1e18);
+    if(long?p<=trail:p>=trail)closeTrade(b,'TRAILING STOP'+(b.locked?' (LOCKED PROFIT)':''),p);
     else if(long?p>=b.entry*(1+b.tp/100):p<=b.entry*(1-b.tp/100))closeTrade(b,'TAKE PROFIT',p);
     else if((long&&r.signal===0)||(!long&&r.signal===1))closeTrade(b,'SIGNAL FLIP',p);
    }
@@ -362,7 +400,7 @@ async function tickBot(b){
 }
 async function tick(){for(const b of Object.values(S.bots))await tickBot(b);
  if(S.auto&&S.pending>0){S.bank+=S.pending;S.pending=0}
- save();renderMoney();showBot();renderPos();renderList()}
+ save();renderMoney();showBot();renderPos();renderList();renderDay()}
 /* ---------------- manual ---------------- */
 function showHold(){const h=S.hold[sel],p=px(sel);
  $('hold').innerHTML=h?`<b>${h.side}</b> ${h.qty.toFixed(2)} @ ${inr(h.entry)} \u00b7 value ${inr(h.qty*unitOf(sel)*(p||0)*margOf(sel))} \u00b7 P&L <b class="${(h.side==='LONG'?p-h.entry:h.entry-p)>=0?'up':'dn'}">${inr((h.side==='LONG'?p-h.entry:h.entry-p)*h.qty*unitOf(sel))}</b>`:'No manual position in '+sel+'.';
@@ -377,7 +415,27 @@ function manual(side){
  if(!openTrade(sel,side,q,'MANUAL',null))return alert('Not enough free capital.');
  save();renderAll();
 }
-function renderAll(){renderMoney();renderList();showHead();showBot();showHold();renderPos();renderSugg()}
+function fmtSign(v){return (v>=0?'+':'-')+inr(Math.abs(v))}
+function renderDay(){
+ ensureDay();
+ const D=BOOKALL?(S.bySym||{}):(S.day&&S.day.bySym)||{};
+ const rows=Object.entries(D).sort((a,b)=>b[1].net-a[1].net);
+ const tot=rows.reduce((a,[,x])=>({gross:a.gross+x.gross,fee:a.fee+x.fee,net:a.net+x.net,trades:a.trades+x.trades}),{gross:0,fee:0,net:0,trades:0});
+ const prof=rows.filter(([,x])=>x.net>0).length, loss=rows.filter(([,x])=>x.net<0).length;
+ $('booktoday').classList.toggle('on',!BOOKALL);$('bookall').classList.toggle('on',BOOKALL);
+ $('daylabel').textContent=BOOKALL?'all sessions':(S.day.key||todayKey());
+ $('daysum').innerHTML=[['Net after brokerage',fmtSign(tot.net),tot.net>=0?'up':'dn'],
+  ['Gross P&L',fmtSign(tot.gross),tot.gross>=0?'up':'dn'],['Brokerage paid',inr(tot.fee),'dn'],
+  ['Closed trades',String(tot.trades),''],['Shares in profit',String(prof),'up'],['Shares in loss',String(loss),'dn']]
+  .map(x=>`<div class="pcell"><small>${x[0]}</small><b class="${x[2]}">${x[1]}</b></div>`).join('');
+ if(!rows.length){$('daytable').innerHTML='<div class="legend" style="padding-top:8px">No trades booked yet '+(BOOKALL?'':'today')+'. Start an algo or place an order.</div>';return}
+ $('daytable').innerHTML='<div class="jrow"><span class="jhead">Share</span><span class="jhead">Trades</span><span class="jhead">Gross</span><span class="jhead">Brokerage</span><span class="jhead">Net</span><span class="jhead">Result</span></div>'
+  +rows.map(([sym,x])=>`<div class="jrow"><b>${sym}</b><span>${x.trades}</span><span class="${x.gross>=0?'up':'dn'}">${fmtSign(x.gross)}</span><span>${inr(x.fee)}</span><b class="${x.net>=0?'up':'dn'}">${fmtSign(x.net)}</b><span class="pillx ${x.net>=0?'buy':'sell'}" style="font-size:9px;padding:2px 7px">${x.net>=0?'PROFIT':'LOSS'}</span></div>`).join('')
+  +`<div class="jrow" style="border-bottom:0;font-weight:800"><b>Open (unrealised)</b><span></span><span></span><span></span><b class="${unrealized()>=0?'up':'dn'}">${fmtSign(unrealized())}</b><span></span></div>`;
+}
+$('booktoday').onclick=()=>{BOOKALL=false;renderDay()};
+$('bookall').onclick=()=>{BOOKALL=true;renderDay()};
+function renderAll(){renderMoney();renderList();showHead();showBot();showHold();renderPos();renderSugg();renderDay()}
 const showAll=renderAll;
 /* ---------------- chart / backtest ---------------- */
 function draw(r){
@@ -424,7 +482,7 @@ async function boot(){
  ALL=await (await fetch('/api/instruments')).json();
  ALL.forEach(i=>INSTR[i.symbol]=i);
  sel=ALL.find(i=>i.symbol==='RELIANCE')?  'RELIANCE' : (ALL[0]&&ALL[0].symbol);
- chips();renderList();showHead();showAll();renderMoney();
+ chips();renderList();showHead();showAll();renderMoney();ensureDay();
  await loadFX();loadQuotes();run();loadScan();
  Object.values(S.bots).forEach(b=>tickBot(b));
 }

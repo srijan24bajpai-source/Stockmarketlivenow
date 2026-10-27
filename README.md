@@ -60,6 +60,25 @@ carries a live call from `/api/recommend`, plus a confidence score, target, stop
 
 Calls are mechanical model output on delayed data, not advice.
 
+## Daily profit / loss book
+
+A dedicated book window shows, per share, what was booked **today**: trades, gross P&L,
+brokerage and net P&L, tagged PROFIT or LOSS, with the day's totals and open unrealised P&L.
+`All time` shows the same per share across every session, and completed days are archived
+(kept for 30 sessions) under `S.days`.
+
+Accounting is net of **both** commission legs: `net = gross - entry commission - exit commission`,
+so `net = gross - brokerage` reconciles exactly while nothing is open.
+
+## Staying net-positive after brokerage
+
+- The bot arms a **profit lock** once a position is +2.02% (the round-trip commission plus a
+  hair). From then on the trailing stop never sits below that locked price, so any exit after
+  locking is guaranteed positive after both 1% legs.
+- Partial booking, take profit and trailing exits all use the locked floor when it is higher.
+- Genuine stop-outs still exit at a loss: the lock protects profits already earned, it does not
+  prevent risk management.
+
 ## Limits - read this
 
 - No real money, no broker, no order routing. Fills use the last quoted price: no slippage,

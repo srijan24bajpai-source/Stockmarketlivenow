@@ -51,6 +51,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check('partial profit booked', b.qty > 0 && b.partialDone && S.pending > 0, 'pending \u20b9' + S.pending.toFixed(0));
   P = 107; await globalThis.__tickBot(b);
   check('take profit closed the rest', !b.pos, 'net \u20b9' + S.net.toFixed(0));
+  check('profit lock armed after moving into profit', b.locked === true && b.floor > b.entry, 'floor \u20b9' + (b.floor || 0).toFixed(2));
+  check('net P&L is after BOTH brokerage legs', Math.abs(S.net - (S.gross - S.fee)) < 1,
+    'gross ' + S.gross.toFixed(0) + ' - fee ' + S.fee.toFixed(0) + ' = ' + (S.gross - S.fee).toFixed(0) + ' vs net ' + S.net.toFixed(0));
+  const dayA = S.day.bySym.AAPL || {};
+  check('daily book records the share as profitable', (dayA.net || 0) > 0 && dayA.trades === 2,
+    'AAPL net \u20b9' + (dayA.net || 0).toFixed(0) + ' over ' + dayA.trades + ' trades');
+  check('day total equals sum of shares', Math.abs(Object.values(S.day.bySym).reduce((a, x) => a + x.net, 0) - S.day.net) < 1);
   const netAfterLong = S.net;
   SIG = 0; b.cd = 0; await globalThis.__tickBot(b);
   check('short side opens when signal is bearish', b.pos === 1 && b.side === 'SHORT');
